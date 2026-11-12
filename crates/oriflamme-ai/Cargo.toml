@@ -1,0 +1,11 @@
+[package]
+name = "oriflamme-ai"
+version = "0.1.0"
+edition = "2024"
+description = "Reusable computer-player strategies for Oriflamme"
+
+[dependencies]
+oriflamme-core = { path = "../oriflamme-core" }
+
+[lints]
+workspace = true
