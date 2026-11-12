@@ -1,0 +1,12 @@
+[package]
+name = "oriflamme-art"
+version = "0.1.0"
+edition = "2024"
+description = "Rasterises the card SVGs in art/cards to PNG files in assets/cards"
+publish = false
+
+[dependencies]
+resvg = { version = "0.45", default-features = false }
+
+[lints]
+workspace = true
