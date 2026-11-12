@@ -1,0 +1,10 @@
+[package]
+name = "oriflamme-core"
+version = "0.1.0"
+edition = "2024"
+description = "Rules engine for the card game Oriflamme (base game)"
+
+[dependencies]
+
+[lints]
+workspace = true
