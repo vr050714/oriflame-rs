@@ -70,7 +70,7 @@ Depends only on `oriflamme-core`.
 - Images are compiled into the exe with `include_bytes!` and decoded once into the `CardArt` resource (`screens.rs`). The game does not use the asset server for them, so the exe runs from any folder. Adding an image means adding it to `CardArt`.
 - `main.rs` forces the DX12 backend on Windows unless `WGPU_BACKEND` is set: the Vulkan driver on the development machine's Intel GPU segfaults at start-up.
 - Bevy is built with `default-features = false` and a UI-only feature list in `Cargo.toml`. A missing Bevy type usually means a missing feature there.
-- `build.rs` embeds `assets/icon.ico` into the exe with `winresource`; `set_window_icon` in `main.rs` sets the title-bar icon at run time through `WINIT_WINDOWS`.
+- `build.rs` embeds `assets/icon.ico` into the exe with `winresource`; `set_window_icon` in `icon.rs` (native only) sets the title-bar icon at run time through `WINIT_WINDOWS`.
 
 ### `crates/oriflamme-art`: art pipeline
 

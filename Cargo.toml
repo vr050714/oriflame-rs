@@ -7,6 +7,7 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
+# Features shared by every target. Native and web add their own below.
 # Listed one by one instead of the `default_app`, `ui_api` and `ui_bevy_render`
 # bundles: those also pull in animation, gizmos, HDR and automatic reflection
 # registration, which the game does not use and which add megabytes to the wasm.
@@ -35,14 +36,22 @@ bevy = { version = "0.20.1", default-features = false, features = [
     "bevy_input_focus",
     "bevy_picking",
     "ui_picking",
-    "multi_threaded",
-    "x11",
-    "wayland",
 ] }
 oriflamme-core = { path = "crates/oriflamme-core" }
 oriflamme-ai = { path = "crates/oriflamme-ai" }
+# `SystemTime` that works in the browser; re-exports `std::time` on native.
+web-time = "1.1"
+
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+bevy = { version = "0.20.1", default-features = false, features = ["multi_threaded", "x11", "wayland"] }
 # Same version as Bevy uses; needed only for the window icon type.
 winit = { version = "0.30", default-features = false }
+
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+bevy = { version = "0.20.1", default-features = false, features = ["webgl2", "web"] }
+# Compile out info, debug and trace logging in release web builds: smaller wasm.
+tracing = { version = "0.1", default-features = false, features = ["release_max_level_warn"] }
+log = { version = "0.4", default-features = false, features = ["release_max_level_warn"] }
 
 [build-dependencies]
 winresource = "0.1"
