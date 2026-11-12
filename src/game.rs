@@ -14,10 +14,8 @@ use oriflamme_core::{
     Action, CardKind, Event, GameState, MIN_PLAYERS, PlayerId, Rng64, SetupError, Slot, Snapshot,
     Stack, Step,
 };
-use std::{
-    collections::VecDeque,
-    time::{SystemTime, UNIX_EPOCH},
-};
+use std::collections::VecDeque;
+use web_time::{SystemTime, UNIX_EPOCH};
 
 /// The human always sits in seat 0.
 pub const HUMAN: PlayerId = 0;

@@ -17,7 +17,21 @@ cargo test -p oriflamme-core                # rules tests, fast
 cargo test -p oriflamme-core archer         # tests whose name contains "archer"
 cargo test -p oriflamme-ai --release -- --nocapture   # bot strength tests; slow, always use --release
 cargo run -p oriflamme-art                  # regenerate assets/ from art/ after editing an SVG
+cargo clippy -p oriflamme-rs --target wasm32-unknown-unknown -- -D warnings   # check the web build
+sh web/build.sh                             # web build into dist/ (needs wasm-bindgen and wasm-opt on PATH)
+python -m http.server -d dist               # serve dist/ locally
 ```
+
+### Web build
+
+- `.github/workflows/pages.yml` runs `web/build.sh` on every push to `main` and deploys `dist/` to GitHub Pages.
+- `web/index.html` is the page; `web/build.sh` runs `wasm-bindgen --target web`, then `wasm-opt -Oz`, then copies the page and `assets/icon.png` into `dist/`.
+- The `wasm-bindgen` CLI must have the same version as the `wasm-bindgen` crate in `Cargo.lock`. CI reads the version from `Cargo.lock`; locally, `cargo install wasm-bindgen-cli --version <that version>`. Locally `wasm-opt` comes from `cargo install wasm-opt`.
+- The web build uses the `web` cargo profile (release without `strip`, because wasm-bindgen needs the `target_features` section; `wasm-opt` strips afterwards).
+- Size: about 17 MB raw, 5.3 MB gzipped. Most of it is Bevy ECS code plus reflection, serde and shader compiling (naga, wesl), which Bevy always includes. The Bevy feature list is explicit on purpose: the `default_app`/`ui_api` bundles add animation, gizmos, HDR and `reflect_auto_register`. Measure with `twiggy top` on `target/wasm32-unknown-unknown/web/oriflamme-rs.wasm` before adding features.
+- Native-only and web-only Bevy features live in the target-specific `[target.'cfg(...)'.dependencies]` sections of the root `Cargo.toml`. The web build uses WebGL2, has no threads, and compiles out logging below `warn`.
+- Use `web_time` instead of `std::time::SystemTime`/`Instant`: the std versions panic in the browser.
+- In the browser, `AsyncComputeTaskPool` runs on the main thread, so a bot's search freezes the page until it finishes.
 
 - A cold Bevy build takes 10 to 25 minutes and a lot of memory on this machine. Use `-j 4` if memory is short. Changing Bevy features or adding a dependency that Bevy shares (for example `winit`) triggers a full rebuild.
 - `cargo build --release` fails to overwrite the exe while the game is running. Close the game first.
@@ -70,7 +84,7 @@ Depends only on `oriflamme-core`.
 - Images are compiled into the exe with `include_bytes!` and decoded once into the `CardArt` resource (`screens.rs`). The game does not use the asset server for them, so the exe runs from any folder. Adding an image means adding it to `CardArt`.
 - `main.rs` forces the DX12 backend on Windows unless `WGPU_BACKEND` is set: the Vulkan driver on the development machine's Intel GPU segfaults at start-up.
 - Bevy is built with `default-features = false` and a UI-only feature list in `Cargo.toml`. A missing Bevy type usually means a missing feature there.
-- `build.rs` embeds `assets/icon.ico` into the exe with `winresource`; `set_window_icon` in `main.rs` sets the title-bar icon at run time through `WINIT_WINDOWS`.
+- `build.rs` embeds `assets/icon.ico` into the exe with `winresource`; `set_window_icon` in `icon.rs` (native only) sets the title-bar icon at run time through `WINIT_WINDOWS`.
 
 ### `crates/oriflamme-art`: art pipeline
 
