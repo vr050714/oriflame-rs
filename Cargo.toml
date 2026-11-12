@@ -7,7 +7,38 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
-bevy = { version = "0.20.1", default-features = false, features = ["default_app", "std", "bevy_winit", "default_font", "multi_threaded", "ui_api", "ui_bevy_render", "bevy_ui_widgets", "bevy_picking", "ui_picking", "x11", "wayland"] }
+# Listed one by one instead of the `default_app`, `ui_api` and `ui_bevy_render`
+# bundles: those also pull in animation, gizmos, HDR and automatic reflection
+# registration, which the game does not use and which add megabytes to the wasm.
+bevy = { version = "0.20.1", default-features = false, features = [
+    "std",
+    "async_executor",
+    "bevy_asset",
+    "bevy_log",
+    "bevy_state",
+    "bevy_winit",
+    "bevy_window",
+    "bevy_camera",
+    "bevy_color",
+    "bevy_image",
+    "png",
+    "bevy_mesh",
+    "bevy_shader",
+    "bevy_material",
+    "bevy_render",
+    "bevy_core_pipeline",
+    "bevy_text",
+    "default_font",
+    "bevy_ui",
+    "bevy_ui_render",
+    "bevy_ui_widgets",
+    "bevy_input_focus",
+    "bevy_picking",
+    "ui_picking",
+    "multi_threaded",
+    "x11",
+    "wayland",
+] }
 oriflamme-core = { path = "crates/oriflamme-core" }
 oriflamme-ai = { path = "crates/oriflamme-ai" }
 # Same version as Bevy uses; needed only for the window icon type.
