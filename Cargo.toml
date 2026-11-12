@@ -1,0 +1,47 @@
+[workspace]
+members = ["crates/*"]
+
+[package]
+name = "oriflamme-rs"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+bevy = { version = "0.20.1", default-features = false, features = ["default_app", "std", "bevy_winit", "default_font", "multi_threaded", "ui_api", "ui_bevy_render", "bevy_ui_widgets", "bevy_picking", "ui_picking", "x11", "wayland"] }
+oriflamme-core = { path = "crates/oriflamme-core" }
+oriflamme-ai = { path = "crates/oriflamme-ai" }
+# Same version as Bevy uses; needed only for the window icon type.
+winit = { version = "0.30", default-features = false }
+
+[build-dependencies]
+winresource = "0.1"
+
+[lints]
+workspace = true
+
+[profile.release]
+opt-level = "z"
+lto = "fat"
+codegen-units = 1
+panic = "abort"
+strip = true
+
+[profile.dev.package."*"]
+opt-level = 3
+
+[workspace.lints.rust]
+unsafe_code = "forbid"
+
+[workspace.lints.clippy]
+unwrap_used = "deny"
+expect_used = "deny"
+panic = "deny"
+todo = "deny"
+unimplemented = "deny"
+unreachable = "deny"
+indexing_slicing = "deny"
+arithmetic_side_effects = "deny"
+panic_in_result_fn = "deny"
+
+[profile.dev]
+opt-level = 1
