@@ -66,6 +66,12 @@ codegen-units = 1
 panic = "abort"
 strip = true
 
+# Web build. Keeps the `target_features` and name sections that wasm-bindgen
+# needs; `wasm-opt --strip-debug --strip-producers` removes them afterwards.
+[profile.web]
+inherits = "release"
+strip = false
+
 [profile.dev.package."*"]
 opt-level = 3
 
