@@ -43,7 +43,9 @@ const ART_W: f32 = 86.0;
 const ART_H: f32 = 118.0;
 /// Size of the panel under the hand that explains a card.
 const INFO_W: f32 = 640.0;
-const INFO_H: f32 = 76.0;
+const INFO_H: f32 = 96.0;
+/// Log lines shown on the board.
+const LOG_LINES: usize = 7;
 
 /// Family colour of each seat.
 fn family_color(player: PlayerId) -> Color {
@@ -841,6 +843,14 @@ fn board(ui: &mut ChildSpawnerCommands, session: &Session, art: &CardArt) {
         }
     });
     card_info(ui, session);
+
+    // Recent events, newest last.
+    ui.spawn(column(2.0)).with_children(|ui| {
+        let start = session.log.len().saturating_sub(LOG_LINES);
+        for line in session.log.iter().skip(start) {
+            ui.spawn(text(line.clone(), 15.0, DIM));
+        }
+    });
 }
 
 /// The card whose ability the panel under the hand explains, with the title
