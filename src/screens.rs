@@ -41,6 +41,9 @@ const CARD_H: f32 = 128.0;
 /// Size of the art inside the 5-pixel card border.
 const ART_W: f32 = 86.0;
 const ART_H: f32 = 118.0;
+/// Size of the panel under the hand that explains a card.
+const INFO_W: f32 = 640.0;
+const INFO_H: f32 = 96.0;
 /// Log lines shown on the board.
 const LOG_LINES: usize = 7;
 
@@ -633,9 +636,7 @@ fn prompt(session: &Session) -> String {
         Phase::Resolution {
             decision: Decision::Ability(kind),
             ..
-        } => {
-            format!("{kind}: pick a highlighted card. {}", kind.description())
-        }
+        } => format!("{kind}: pick a highlighted card."),
         Phase::GameOver => "The game is over.".to_owned(),
     }
 }
@@ -841,9 +842,7 @@ fn board(ui: &mut ChildSpawnerCommands, session: &Session, art: &CardArt) {
             );
         }
     });
-    if let Some(kind) = session.selected {
-        ui.spawn(text(format!("{kind}: {}", kind.description()), 16.0, DIM));
-    }
+    card_info(ui, session);
 
     // Recent events, newest last.
     ui.spawn(column(2.0)).with_children(|ui| {
@@ -851,6 +850,69 @@ fn board(ui: &mut ChildSpawnerCommands, session: &Session, art: &CardArt) {
         for line in session.log.iter().skip(start) {
             ui.spawn(text(line.clone(), 15.0, DIM));
         }
+    });
+}
+
+/// The card whose ability the panel under the hand explains, with the title
+/// to show: the hand card the human picked, or the human's card waiting for a
+/// decision.
+fn focused_card(session: &Session) -> Option<(String, CardKind)> {
+    if let Some(kind) = session.selected {
+        return Some((kind.name().to_owned(), kind));
+    }
+    if !session.human_turn() {
+        return None;
+    }
+    let Phase::Resolution { card, decision } = session.state.phase else {
+        return None;
+    };
+    let kind = match decision {
+        Decision::RevealOrNot => card.kind,
+        Decision::Ability(kind) => kind,
+    };
+    let title = if kind == card.kind {
+        kind.name().to_owned()
+    } else {
+        // A Shapeshifter using the ability it copies.
+        format!("{} (copying {kind})", card.kind)
+    };
+    Some((title, kind))
+}
+
+/// The panel under the hand that explains what the picked card does. It keeps
+/// its size when empty, so the board does not jump when a card is picked.
+fn card_info(ui: &mut ChildSpawnerCommands, session: &Session) {
+    let focus = focused_card(session);
+    let may_pick = session.human_turn() && matches!(session.state.phase, Phase::Placement { .. });
+    ui.spawn((
+        Node {
+            width: px(INFO_W),
+            max_width: percent(100),
+            min_height: px(INFO_H),
+            padding: UiRect::axes(px(16), px(8)),
+            border: UiRect::all(px(3)),
+            border_radius: BorderRadius::all(px(10)),
+            flex_direction: FlexDirection::Column,
+            justify_content: JustifyContent::Center,
+            row_gap: px(4),
+            ..default()
+        },
+        BackgroundColor(PANEL),
+        BorderColor::all(if focus.is_some() { GOLD } else { PANEL }),
+    ))
+    .with_children(|ui| match focus {
+        Some((title, kind)) => {
+            ui.spawn(text(title, 20.0, GOLD));
+            ui.spawn(text(kind.description(), 18.0, PAPER));
+        }
+        None if may_pick => {
+            ui.spawn(text(
+                "Pick a card from your hand to see what it does.",
+                18.0,
+                DIM,
+            ));
+        }
+        None => {}
     });
 }
 
