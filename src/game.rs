@@ -3,7 +3,9 @@
 
 use crate::{
     Screen,
+    i18n::card_name,
     screens::{Motion, UiDirty},
+    t,
 };
 use bevy::{
     prelude::*,
@@ -11,8 +13,8 @@ use bevy::{
 };
 use oriflamme_ai::{Difficulty, make_strategy};
 use oriflamme_core::{
-    Action, CardKind, Event, GameState, MIN_PLAYERS, PlayerId, Rng64, SetupError, Slot, Snapshot,
-    Stack, Step,
+    Action, CardKind, Event, GameState, MIN_PLAYERS, PlayerId, Rng64, RuleError, SetupError, Slot,
+    Snapshot, Stack, Step,
 };
 use std::collections::VecDeque;
 use web_time::{SystemTime, UNIX_EPOCH};
@@ -48,18 +50,44 @@ pub enum Role {
     Target,
 }
 
+/// Short text shown on a card in a scene.
+#[derive(Clone, Copy)]
+pub enum Label {
+    Gain(u32),
+    Loss(u32),
+    Copied,
+    Eliminated,
+    /// An Ambush that gained this much.
+    Ambush(u32),
+    Discarded,
+    Moves,
+}
+
+impl Label {
+    /// The text in the current language.
+    pub fn text(self) -> String {
+        match self {
+            Label::Gain(amount) => format!("+{amount}"),
+            Label::Loss(amount) => format!("-{amount}"),
+            Label::Copied => t!("mark-copied"),
+            Label::Eliminated => t!("mark-eliminated"),
+            Label::Ambush(gained) => t!("mark-ambush", gained = gained),
+            Label::Discarded => t!("mark-discarded"),
+            Label::Moves => t!("mark-moves"),
+        }
+    }
+}
+
 /// A card singled out in a scene.
 pub struct Mark {
     pub pos: usize,
     pub role: Role,
-    /// Short text shown on the card, for example `+2` or `eliminated`.
-    pub label: Option<String>,
+    pub label: Option<Label>,
     pub motion: Motion,
 }
 
 impl Mark {
-    fn new(pos: usize, role: Role, label: impl Into<String>, motion: Motion) -> Self {
-        let label = Some(label.into()).filter(|text| !text.is_empty());
+    fn new(pos: usize, role: Role, label: Option<Label>, motion: Motion) -> Self {
         Self {
             pos,
             role,
@@ -70,23 +98,41 @@ impl Mark {
 }
 
 /// One step of an action as it is shown to the player: a frozen table, the
-/// cards involved, and a sentence saying what happens.
+/// cards involved, and the event, which [`describe`] puts into a sentence.
 pub struct Scene {
     pub queue: Vec<Stack>,
     pub influence: Vec<u32>,
-    pub text: String,
+    pub event: Event,
     pub marks: Vec<Mark>,
     seconds: f32,
 }
 
 impl Scene {
-    fn new(table: Snapshot, text: String, marks: Vec<Mark>, seconds: f32) -> Self {
+    fn new(table: Snapshot, event: Event, marks: Vec<Mark>, seconds: f32) -> Self {
         Self {
             queue: table.queue,
             influence: table.influence,
-            text,
+            event,
             marks,
             seconds,
+        }
+    }
+}
+
+/// One line of the game log. Kept untranslated, so the log follows the
+/// language when it is changed.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum LogLine {
+    Event(Event),
+    Error(RuleError),
+}
+
+impl LogLine {
+    /// The line in the current language.
+    pub fn text(self) -> String {
+        match self {
+            LogLine::Event(event) => describe(event),
+            LogLine::Error(error) => t!("log-error", error = error.to_string()),
         }
     }
 }
@@ -98,7 +144,7 @@ pub struct Session {
     pub difficulty: Difficulty,
     pub rng: Rng64,
     /// Game log, oldest first.
-    pub log: Vec<String>,
+    pub log: Vec<LogLine>,
     /// Hand card the human picked and is about to place.
     pub selected: Option<CardKind>,
     /// Royal Decree: the position the human picked to move a card from.
@@ -122,7 +168,7 @@ impl Session {
             state,
             difficulty: settings.difficulty,
             rng,
-            log: vec!["Round 1 begins.".to_owned()],
+            log: vec![LogLine::Event(Event::RoundStarted(1))],
             selected: None,
             move_from: None,
             scene: None,
@@ -150,7 +196,7 @@ impl Session {
                     self.next_scene();
                 }
             }
-            Err(error) => self.log.push(error.to_string()),
+            Err(error) => self.log.push(LogLine::Error(error)),
         }
         self.selected = None;
         self.move_from = None;
@@ -161,8 +207,9 @@ impl Session {
         self.scene = self.scenes.pop_front();
         if let Some(scene) = &self.scene {
             // An action shown in two scenes is logged once.
-            if self.log.last() != Some(&scene.text) {
-                self.log.push(scene.text.clone());
+            let line = LogLine::Event(scene.event);
+            if self.log.last() != Some(&line) {
+                self.log.push(line);
             }
             self.scene_timer = Timer::from_seconds(scene.seconds, TimerMode::Once);
         }
@@ -180,9 +227,9 @@ pub fn play_scenes(time: Res<Time>, mut session: ResMut<Session>, mut dirty: Res
 /// Display name of a player.
 pub fn player_name(player: PlayerId) -> String {
     if player == HUMAN {
-        "You".to_owned()
+        t!("player-you")
     } else {
-        format!("PC {player}")
+        t!("player-pc", number = player)
     }
 }
 
@@ -193,18 +240,17 @@ fn scenes_for(step: Step) -> Vec<Scene> {
         mut before,
         after,
     } = step;
-    let text = describe(event);
     // Shows the identity of a face-down card that is about to leave the table.
     let mut turn_up = |pos: usize| {
         if let Some(card) = before.queue.get_mut(pos).and_then(|stack| stack.last_mut()) {
             card.face_up = true;
         }
     };
-    let actor = |pos: Option<usize>, label: &str| {
+    let actor = |pos: Option<usize>, label: Option<Label>| {
         pos.map(|pos| Mark::new(pos, Role::Actor, label, Motion::Pulse))
     };
     match event {
-        Event::RoundStarted(_) => vec![Scene::new(after, text, Vec::new(), 0.9)],
+        Event::RoundStarted(_) => vec![Scene::new(after, event, Vec::new(), 0.9)],
         Event::GameOver => Vec::new(),
         Event::Placed { slot, .. } => {
             let pos = match slot {
@@ -212,58 +258,67 @@ fn scenes_for(step: Step) -> Vec<Scene> {
                 Slot::Right => after.queue.len().saturating_sub(1),
                 Slot::OnStack(pos) => pos,
             };
-            let marks = vec![Mark::new(pos, Role::Actor, "", Motion::Arrive)];
-            vec![Scene::new(after, text, marks, 0.8)]
+            let marks = vec![Mark::new(pos, Role::Actor, None, Motion::Arrive)];
+            vec![Scene::new(after, event, marks, 0.8)]
         }
         Event::KeptHidden { pos, .. } => {
             vec![Scene::new(
                 after,
-                text,
-                actor(Some(pos), "+1").into_iter().collect(),
+                event,
+                actor(Some(pos), Some(Label::Gain(1))).into_iter().collect(),
                 0.9,
             )]
         }
         Event::Revealed { pos, gained, .. } => {
-            let label = if gained > 0 {
-                format!("+{gained}")
-            } else {
-                String::new()
-            };
+            let label = (gained > 0).then_some(Label::Gain(gained));
             vec![Scene::new(
                 after,
-                text,
-                actor(Some(pos), &label).into_iter().collect(),
+                event,
+                actor(Some(pos), label).into_iter().collect(),
                 1.4,
             )]
         }
         Event::Gained { pos, amount, .. } => {
-            let marks = actor(pos, &format!("+{amount}")).into_iter().collect();
-            vec![Scene::new(after, text, marks, 1.2)]
+            let marks = actor(pos, Some(Label::Gain(amount))).into_iter().collect();
+            vec![Scene::new(after, event, marks, 1.2)]
         }
         Event::Stole { pos, target, .. } => {
-            let mut marks: Vec<Mark> = actor(pos, "+1").into_iter().collect();
-            marks.push(Mark::new(target, Role::Target, "-1", Motion::Pulse));
-            vec![Scene::new(after, text, marks, 1.4)]
+            let mut marks: Vec<Mark> = actor(pos, Some(Label::Gain(1))).into_iter().collect();
+            marks.push(Mark::new(
+                target,
+                Role::Target,
+                Some(Label::Loss(1)),
+                Motion::Pulse,
+            ));
+            vec![Scene::new(after, event, marks, 1.4)]
         }
         Event::Copied { pos, target, .. } => {
-            let mut marks: Vec<Mark> = actor(pos, "").into_iter().collect();
-            marks.push(Mark::new(target, Role::Target, "copied", Motion::Pulse));
-            vec![Scene::new(after, text, marks, 1.2)]
+            let mut marks: Vec<Mark> = actor(pos, None).into_iter().collect();
+            marks.push(Mark::new(
+                target,
+                Role::Target,
+                Some(Label::Copied),
+                Motion::Pulse,
+            ));
+            vec![Scene::new(after, event, marks, 1.2)]
         }
         Event::Eliminated {
             by_pos, target_pos, ..
         } => {
             turn_up(target_pos);
-            let mut marks: Vec<Mark> = actor(by_pos.filter(|&pos| pos != target_pos), "+1")
-                .into_iter()
-                .collect();
+            let mut marks: Vec<Mark> = actor(
+                by_pos.filter(|&pos| pos != target_pos),
+                Some(Label::Gain(1)),
+            )
+            .into_iter()
+            .collect();
             marks.push(Mark::new(
                 target_pos,
                 Role::Target,
-                "eliminated",
+                Some(Label::Eliminated),
                 Motion::Vanish,
             ));
-            vec![Scene::new(before, text, marks, 1.6)]
+            vec![Scene::new(before, event, marks, 1.6)]
         }
         Event::Ambushed {
             by_pos,
@@ -272,101 +327,119 @@ fn scenes_for(step: Step) -> Vec<Scene> {
             ..
         } => {
             turn_up(target_pos);
-            let mut marks: Vec<Mark> = actor(by_pos.filter(|&pos| pos != target_pos), "+1")
-                .into_iter()
-                .collect();
-            let label = format!("Ambush! +{gained}");
-            marks.push(Mark::new(target_pos, Role::Target, label, Motion::Pulse));
-            vec![Scene::new(before, text, marks, 1.8)]
+            let mut marks: Vec<Mark> = actor(
+                by_pos.filter(|&pos| pos != target_pos),
+                Some(Label::Gain(1)),
+            )
+            .into_iter()
+            .collect();
+            marks.push(Mark::new(
+                target_pos,
+                Role::Target,
+                Some(Label::Ambush(gained)),
+                Motion::Pulse,
+            ));
+            vec![Scene::new(before, event, marks, 1.8)]
         }
         Event::Discarded { pos, .. } => {
-            let marks = vec![Mark::new(pos, Role::Target, "discarded", Motion::Vanish)];
-            vec![Scene::new(before, text, marks, 1.3)]
+            let marks = vec![Mark::new(
+                pos,
+                Role::Target,
+                Some(Label::Discarded),
+                Motion::Vanish,
+            )];
+            vec![Scene::new(before, event, marks, 1.3)]
         }
         Event::Moved { from, to, .. } => {
-            let leaving = vec![Mark::new(from, Role::Target, "moves", Motion::Vanish)];
-            let arriving = vec![Mark::new(to, Role::Actor, "", Motion::Arrive)];
+            let leaving = vec![Mark::new(
+                from,
+                Role::Target,
+                Some(Label::Moves),
+                Motion::Vanish,
+            )];
+            let arriving = vec![Mark::new(to, Role::Actor, None, Motion::Arrive)];
             vec![
-                Scene::new(before, text.clone(), leaving, 1.2),
-                Scene::new(after, text, arriving, 0.9),
+                Scene::new(before, event, leaving, 1.2),
+                Scene::new(after, event, arriving, 0.9),
             ]
         }
     }
 }
 
-/// One sentence for an event.
-fn describe(event: Event) -> String {
+/// One sentence for an event, in the current language.
+pub fn describe(event: Event) -> String {
     match event {
-        Event::RoundStarted(round) => format!("Round {round} begins."),
+        Event::RoundStarted(round) => t!("log-round", round = round),
         Event::Placed { player, slot } => {
-            let place = match slot {
-                Slot::Left => "at the start of the queue",
-                Slot::Right => "at the end of the queue",
-                Slot::OnStack(_) => "on top of an own card",
+            let key = match slot {
+                Slot::Left => "log-placed-left",
+                Slot::Right => "log-placed-right",
+                Slot::OnStack(_) => "log-placed-stack",
             };
-            format!("{} placed a card {place}.", player_name(player))
+            t!(key, player = player_name(player))
         }
         Event::KeptHidden {
             player, influence, ..
-        } => {
-            format!(
-                "{} kept a card hidden ({influence} influence on it).",
-                player_name(player)
-            )
-        }
-        Event::Revealed { card, gained, .. } => {
-            format!(
-                "{} revealed {} and took {gained} influence.",
-                player_name(card.owner),
-                card.kind
-            )
-        }
+        } => t!(
+            "log-kept-hidden",
+            player = player_name(player),
+            influence = influence
+        ),
+        Event::Revealed { card, gained, .. } => t!(
+            "log-revealed",
+            player = player_name(card.owner),
+            card = card_name(card.kind),
+            gained = gained
+        ),
         Event::Gained { player, amount, .. } => {
-            format!("{} gained {amount} influence.", player_name(player))
+            t!("log-gained", player = player_name(player), amount = amount)
         }
-        Event::Stole { thief, victim, .. } => {
-            format!(
-                "{} stole 1 influence from {}.",
-                player_name(thief),
-                player_name(victim)
-            )
-        }
-        Event::Copied { player, kind, .. } => {
-            format!("{}: Shapeshifter copies {kind}.", player_name(player))
-        }
-        Event::Eliminated { by, target, .. } => format!(
-            "{}: {} eliminated {} of {} (+1).",
-            player_name(by.owner),
-            by.kind,
-            target.kind,
-            player_name(target.owner)
+        Event::Stole { thief, victim, .. } => t!(
+            "log-stole",
+            thief = player_name(thief),
+            victim = player_name(victim)
+        ),
+        Event::Copied { player, kind, .. } => t!(
+            "log-copied",
+            player = player_name(player),
+            card = card_name(kind)
+        ),
+        Event::Eliminated { by, target, .. } => t!(
+            "log-eliminated",
+            player = player_name(by.owner),
+            card = card_name(by.kind),
+            target = card_name(target.kind),
+            owner = player_name(target.owner)
         ),
         Event::Ambushed {
             attacker,
             owner,
             gained,
             ..
-        } => format!(
-            "{}: {} hit an Ambush of {} (+{gained} for the Ambush).",
-            player_name(attacker.owner),
-            attacker.kind,
-            player_name(owner)
+        } => t!(
+            "log-ambushed",
+            player = player_name(attacker.owner),
+            card = card_name(attacker.kind),
+            owner = player_name(owner),
+            gained = gained
         ),
-        Event::Discarded { card, .. } => {
-            format!("{} discarded {}.", player_name(card.owner), card.kind)
-        }
+        Event::Discarded { card, .. } => t!(
+            "log-discarded",
+            player = player_name(card.owner),
+            card = card_name(card.kind)
+        ),
         Event::Moved {
             player,
             moved_owner,
             to,
             ..
-        } => format!(
-            "{} moved a card of {} to position {}.",
-            player_name(player),
-            player_name(moved_owner),
-            to.saturating_add(1)
+        } => t!(
+            "log-moved",
+            player = player_name(player),
+            owner = player_name(moved_owner),
+            position = to.saturating_add(1)
         ),
-        Event::GameOver => "The game is over.".to_owned(),
+        Event::GameOver => t!("game-is-over"),
     }
 }
 

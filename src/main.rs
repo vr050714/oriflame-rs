@@ -5,6 +5,7 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 mod game;
+mod i18n;
 #[cfg(not(target_arch = "wasm32"))]
 mod icon;
 mod screens;
@@ -44,6 +45,7 @@ fn main() -> AppExit {
     .init_resource::<game::Settings>()
     .init_resource::<game::BotTurn>()
     .init_resource::<screens::CardArt>()
+    .init_resource::<screens::LanguageMenu>()
     .insert_resource(screens::UiDirty(true))
     .add_systems(Startup, setup)
     .add_systems(
@@ -59,7 +61,20 @@ fn main() -> AppExit {
     .add_observer(screens::on_click);
     #[cfg(not(target_arch = "wasm32"))]
     app.add_systems(Update, icon::set_window_icon);
+    install_font(&mut app);
     app.run()
+}
+
+/// Makes Fira Mono with Latin, Latin Extended and Cyrillic letters the
+/// default font, which every text uses. Bevy's own default font has ASCII
+/// only, so it cannot show Russian or Serbian. The font is compiled into the
+/// executable; its licence is `assets/fonts/OFL.txt`.
+fn install_font(app: &mut App) {
+    let font = Font::from_bytes(include_bytes!("../assets/fonts/FiraMono-Regular.ttf").to_vec());
+    let mut fonts = app.world_mut().resource_mut::<Assets<Font>>();
+    if let Err(error) = fonts.insert(AssetId::default(), font) {
+        error!("cannot install the font: {error}");
+    }
 }
 
 /// The main window. In the browser it draws into the page's `#bevy` canvas
