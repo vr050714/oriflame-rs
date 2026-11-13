@@ -1,0 +1,37 @@
+name: Tests
+
+on:
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: tests-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Format
+        run: cargo fmt --all -- --check
+
+      # Only the two library crates: they do not pull in Bevy, so this stays fast.
+      - name: Clippy
+        run: cargo clippy -p oriflamme-core -p oriflamme-ai --all-targets -- -D warnings
+
+      - name: Rules tests
+        run: cargo test -p oriflamme-core
+
+      # Bot strength tests are slow, so they always run in release mode.
+      - name: Bot tests
+        run: cargo test -p oriflamme-ai --release
