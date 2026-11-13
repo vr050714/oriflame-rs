@@ -55,7 +55,7 @@ const LOG_LINES: usize = 4;
 /// `ROW_EXTRA_H`.
 const BOARD_H: f32 = 830.0;
 const ROW_EXTRA_H: f32 = 190.0;
-const BOARD_MIN_W: f32 = 680.0;
+const BOARD_MIN_W: f32 = 760.0;
 const MENU_H: f32 = 640.0;
 const MENU_MIN_W: f32 = 560.0;
 /// Width of a queue card with its gap, and the extra width of a Royal Decree
@@ -890,7 +890,7 @@ fn board(ui: &mut ChildSpawnerCommands, session: &Session, art: &CardArt) {
     ui.spawn((
         Node {
             padding: UiRect::all(px(10)),
-            max_width: percent(100),
+            width: percent(100),
             ..column(4.0)
         },
         BackgroundColor(PANEL),
@@ -982,7 +982,13 @@ fn board(ui: &mut ChildSpawnerCommands, session: &Session, art: &CardArt) {
 
     // The human's hand.
     ui.spawn(text(t!("your-hand"), 18.0, DIM));
-    ui.spawn(row(8.0)).with_children(|ui| {
+    // Full width, so the row wraps only when the cards really do not fit;
+    // a shrink-to-fit wrapping row can wrap early and overlap what is below.
+    ui.spawn(Node {
+        width: percent(100),
+        ..row(8.0)
+    })
+    .with_children(|ui| {
         let my_turn_to_place =
             session.human_turn() && matches!(state.phase, Phase::Placement { .. });
         for &kind in state.players.get(HUMAN).map_or(&[][..], |p| &p.hand) {
