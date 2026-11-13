@@ -209,6 +209,327 @@ fn spy_has_no_target_next_to_own_or_broke_players() {
     assert_eq!(state.players[0].influence, 1);
 }
 
+/// Phase of a face-down card waiting for its owner to reveal or keep it.
+fn awaiting_reveal(owner: PlayerId, kind: CardKind) -> Phase {
+    Phase::Resolution {
+        card: Card { owner, kind },
+        decision: Decision::RevealOrNot,
+    }
+}
+
+#[test]
+fn spy_may_target_either_neighbour_when_they_belong_to_different_opponents() {
+    let cards = vec![
+        qc(1, Lord, false, 0),
+        qc(0, Spy, false, 0),
+        qc(2, Lord, false, 0),
+    ];
+    let mut state = board_at(cards.clone(), 1);
+    state.apply(Action::Reveal).unwrap();
+    assert_eq!(
+        state.legal_actions(),
+        vec![Action::Target(0), Action::Target(2)]
+    );
+    state.apply(Action::Target(0)).unwrap();
+    // Only the chosen victim pays.
+    assert_eq!(state.scores(), vec![2, 0, 1]);
+
+    let mut state = board_at(cards, 1);
+    state.apply(Action::Reveal).unwrap();
+    state.apply(Action::Target(2)).unwrap();
+    assert_eq!(state.scores(), vec![2, 1, 0]);
+}
+
+#[test]
+fn spy_stays_in_the_queue_face_up_after_stealing() {
+    let mut state = board(vec![qc(0, Spy, false, 0), qc(1, Lord, false, 0)]);
+    state.apply(Action::Reveal).unwrap();
+    state.apply(Action::Target(1)).unwrap();
+    assert!(state.queue[0][0].face_up);
+    assert_eq!(state.queue[0][0].card.kind, Spy);
+    assert!(state.players.iter().all(|p| p.discard.is_empty()));
+    // Resolution moves on to the next card.
+    assert_eq!(state.phase, awaiting_reveal(1, Lord));
+}
+
+#[test]
+fn spy_steals_exactly_one_even_from_a_rich_player() {
+    let mut state = board(vec![qc(0, Spy, false, 0), qc(1, Lord, false, 0)]);
+    state.players[1].influence = 7;
+    state.apply(Action::Reveal).unwrap();
+    state.apply(Action::Target(1)).unwrap();
+    assert_eq!(state.scores(), vec![2, 6, 1]);
+}
+
+#[test]
+fn spy_collects_the_influence_on_its_own_card_and_then_steals() {
+    let mut state = board(vec![qc(0, Spy, false, 2), qc(1, Lord, false, 0)]);
+    state.apply(Action::Reveal).unwrap();
+    assert_eq!(state.players[0].influence, 3);
+    state.apply(Action::Target(1)).unwrap();
+    assert_eq!(state.scores(), vec![4, 0, 1]);
+}
+
+#[test]
+fn spy_kept_hidden_steals_nothing() {
+    let mut state = board(vec![qc(0, Spy, false, 0), qc(1, Lord, false, 0)]);
+    state.apply(Action::KeepHidden).unwrap();
+    assert_eq!(state.scores(), vec![1, 1, 1]);
+    assert!(!state.queue[0][0].face_up);
+    assert_eq!(state.queue[0][0].influence, 1);
+    assert_eq!(state.phase, awaiting_reveal(1, Lord));
+}
+
+#[test]
+fn spy_can_target_a_revealed_neighbour() {
+    let mut state = board(vec![qc(0, Spy, false, 0), qc(1, Lord, true, 0)]);
+    state.apply(Action::Reveal).unwrap();
+    assert_eq!(state.legal_actions(), vec![Action::Target(1)]);
+}
+
+#[test]
+fn spy_skips_a_neighbour_whose_owner_has_no_influence() {
+    let cards = vec![
+        qc(1, Lord, false, 0),
+        qc(0, Spy, false, 0),
+        qc(2, Lord, false, 0),
+    ];
+    let mut state = board_at(cards.clone(), 1);
+    state.players[1].influence = 0;
+    state.apply(Action::Reveal).unwrap();
+    assert_eq!(state.legal_actions(), vec![Action::Target(2)]);
+
+    // Both neighbours broke: no choice is offered and resolution moves on.
+    let mut state = board_at(cards, 1);
+    state.players[1].influence = 0;
+    state.players[2].influence = 0;
+    state.apply(Action::Reveal).unwrap();
+    assert_eq!(state.phase, awaiting_reveal(2, Lord));
+    assert_eq!(state.scores(), vec![1, 0, 0]);
+}
+
+#[test]
+fn spy_never_targets_its_own_cards() {
+    let mut state = board_at(
+        vec![
+            qc(0, Lord, false, 0),
+            qc(0, Spy, false, 0),
+            qc(1, Lord, false, 0),
+        ],
+        1,
+    );
+    state.apply(Action::Reveal).unwrap();
+    assert_eq!(state.legal_actions(), vec![Action::Target(2)]);
+}
+
+#[test]
+fn spy_between_two_cards_of_one_opponent_offers_a_single_target() {
+    let mut state = board_at(
+        vec![
+            qc(1, Lord, false, 0),
+            qc(0, Spy, false, 0),
+            qc(1, Heir, false, 0),
+        ],
+        1,
+    );
+    state.apply(Action::Reveal).unwrap();
+    assert_eq!(state.legal_actions(), vec![Action::Target(0)]);
+    state.apply(Action::Target(0)).unwrap();
+    // One influence is stolen, not one per neighbour.
+    assert_eq!(state.scores(), vec![2, 0, 1]);
+}
+
+#[test]
+fn spy_with_no_neighbours_does_nothing() {
+    let mut state = board(vec![qc(0, Spy, false, 0)]);
+    let events = state.apply(Action::Reveal).unwrap();
+    assert!(!events.iter().any(|e| matches!(e, Event::Stole { .. })));
+    assert_eq!(state.scores(), vec![1, 1, 1]);
+    assert!(state.queue[0][0].face_up);
+    assert_eq!(state.round, 3);
+}
+
+#[test]
+fn spy_only_sees_the_top_card_of_a_neighbouring_stack() {
+    let mut state = board(vec![qc(0, Spy, false, 0), qc(1, Lord, false, 0)]);
+    // An own card now covers the opponent's Lord.
+    state.queue[1].push(qc(0, Heir, false, 0));
+    state.apply(Action::Reveal).unwrap();
+    assert_eq!(state.phase, awaiting_reveal(0, Heir));
+    assert_eq!(state.scores(), vec![1, 1, 1]);
+}
+
+#[test]
+fn face_up_spy_acts_without_being_revealed() {
+    let mut state = board(vec![qc(0, Spy, true, 0), qc(1, Lord, false, 0)]);
+    assert_eq!(
+        state.phase,
+        Phase::Resolution {
+            card: Card {
+                owner: 0,
+                kind: Spy
+            },
+            decision: Decision::Ability(Spy)
+        }
+    );
+    assert_eq!(state.legal_actions(), vec![Action::Target(1)]);
+    state.apply(Action::Target(1)).unwrap();
+    assert_eq!(state.scores(), vec![2, 0, 1]);
+}
+
+#[test]
+fn face_up_spy_with_nothing_to_steal_is_skipped() {
+    let state = board(vec![qc(0, Spy, true, 0), qc(0, Lord, false, 0)]);
+    assert_eq!(state.phase, awaiting_reveal(0, Lord));
+    assert_eq!(state.scores(), vec![1, 1, 1]);
+}
+
+#[test]
+fn spy_rejects_targets_that_are_not_offered() {
+    let mut state = board_at(
+        vec![
+            qc(1, Lord, false, 0),
+            qc(0, Spy, false, 0),
+            qc(0, Heir, false, 0),
+        ],
+        1,
+    );
+    state.apply(Action::Reveal).unwrap();
+    assert_eq!(state.legal_actions(), vec![Action::Target(0)]);
+    for bad in [1, 2, 3] {
+        let before = state.clone();
+        assert_eq!(
+            state.apply(Action::Target(bad)),
+            Err(RuleError::IllegalAction(Action::Target(bad)))
+        );
+        assert_eq!(state, before);
+    }
+}
+
+#[test]
+fn two_spies_cannot_take_more_than_a_pool_holds() {
+    let mut state = board(vec![
+        qc(0, Spy, false, 0),
+        qc(1, Lord, false, 0),
+        qc(2, Spy, false, 0),
+    ]);
+    state.apply(Action::Reveal).unwrap();
+    state.apply(Action::Target(1)).unwrap();
+    assert_eq!(state.scores(), vec![2, 0, 1]);
+    state.apply(Action::KeepHidden).unwrap();
+    // The Lord's owner is now broke, so the second Spy has no victim.
+    state.apply(Action::Reveal).unwrap();
+    assert_eq!(state.scores(), vec![2, 0, 1]);
+    assert_eq!(state.round, 3);
+}
+
+#[test]
+fn spy_stealing_does_not_spring_a_face_down_ambush() {
+    let mut state = board(vec![qc(0, Spy, false, 0), qc(1, Ambush, false, 0)]);
+    state.apply(Action::Reveal).unwrap();
+    state.apply(Action::Target(1)).unwrap();
+    assert_eq!(state.scores(), vec![2, 0, 1]);
+    assert!(!state.queue[1][0].face_up);
+    assert!(state.players.iter().all(|p| p.discard.is_empty()));
+    assert_eq!(state.phase, awaiting_reveal(1, Ambush));
+}
+
+#[test]
+fn eliminated_spy_never_steals() {
+    let mut state = board(vec![
+        qc(1, Soldier, false, 0),
+        qc(0, Spy, false, 0),
+        qc(2, Lord, false, 0),
+    ]);
+    state.apply(Action::Reveal).unwrap();
+    state.apply(Action::Target(1)).unwrap();
+    assert_eq!(state.players[0].discard, vec![Spy]);
+    assert_eq!(state.scores(), vec![1, 2, 1]);
+    assert_eq!(state.phase, awaiting_reveal(2, Lord));
+}
+
+#[test]
+fn spy_reports_a_stole_event_with_before_and_after_tables() {
+    let mut state = board(vec![qc(0, Spy, false, 0), qc(1, Lord, false, 0)]);
+    state.apply(Action::Reveal).unwrap();
+    let steps = state.apply_traced(Action::Target(1)).unwrap();
+    let step = steps.first().unwrap();
+    assert_eq!(
+        step.event,
+        Event::Stole {
+            thief: 0,
+            victim: 1,
+            pos: Some(0),
+            target: 1
+        }
+    );
+    assert_eq!(step.before.influence, vec![1, 1, 1]);
+    assert_eq!(step.after.influence, vec![2, 0, 1]);
+    // Stealing moves no cards.
+    assert_eq!(step.before.queue, step.after.queue);
+}
+
+#[test]
+fn no_stole_event_when_the_spy_has_no_victim() {
+    let mut state = board(vec![qc(0, Spy, false, 0), qc(0, Lord, false, 0)]);
+    let events = state.apply(Action::Reveal).unwrap();
+    assert!(!events.iter().any(|e| matches!(e, Event::Stole { .. })));
+}
+
+#[test]
+fn shapeshifter_copying_a_spy_steals_for_its_own_owner() {
+    let mut state = board_at(
+        vec![
+            qc(1, Spy, true, 0),
+            qc(0, Shapeshifter, false, 0),
+            qc(2, Lord, false, 0),
+        ],
+        1,
+    );
+    state.apply(Action::Reveal).unwrap();
+    // The face-down Lord cannot be copied; the revealed Spy can.
+    assert_eq!(state.legal_actions(), vec![Action::Target(0)]);
+    state.apply(Action::Target(0)).unwrap();
+    // Acting as a Spy, the Shapeshifter may take from either neighbour,
+    // including the owner of the Spy it copied.
+    assert_eq!(
+        state.legal_actions(),
+        vec![Action::Target(0), Action::Target(2)]
+    );
+    state.apply(Action::Target(2)).unwrap();
+    assert_eq!(state.scores(), vec![2, 1, 0]);
+    // Nothing is discarded; the Shapeshifter stays on the table.
+    assert!(state.players.iter().all(|p| p.discard.is_empty()));
+    assert_eq!(state.queue.len(), 3);
+}
+
+#[test]
+fn shapeshifter_copying_a_spy_never_targets_its_owners_own_cards() {
+    let mut state = board_at(
+        vec![
+            qc(1, Spy, true, 0),
+            qc(0, Shapeshifter, false, 0),
+            qc(0, Lord, false, 0),
+        ],
+        1,
+    );
+    state.apply(Action::Reveal).unwrap();
+    state.apply(Action::Target(0)).unwrap();
+    assert_eq!(state.legal_actions(), vec![Action::Target(0)]);
+    state.apply(Action::Target(0)).unwrap();
+    assert_eq!(state.scores(), vec![2, 0, 1]);
+}
+
+#[test]
+fn shapeshifter_copying_a_spy_with_no_victim_does_nothing() {
+    let mut state = board_at(vec![qc(1, Spy, true, 0), qc(0, Shapeshifter, false, 0)], 1);
+    state.players[1].influence = 0;
+    state.apply(Action::Reveal).unwrap();
+    state.apply(Action::Target(0)).unwrap();
+    assert_eq!(state.scores(), vec![1, 0, 1]);
+    assert_eq!(state.round, 3);
+}
+
 #[test]
 fn heir_gains_two_only_when_alone() {
     let mut state = board(vec![qc(0, Heir, false, 0)]);
