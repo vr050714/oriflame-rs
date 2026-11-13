@@ -97,8 +97,6 @@ pub struct Session {
     pub state: GameState,
     pub difficulty: Difficulty,
     pub rng: Rng64,
-    /// Game log, oldest first.
-    pub log: Vec<String>,
     /// Hand card the human picked and is about to place.
     pub selected: Option<CardKind>,
     /// Royal Decree: the position the human picked to move a card from.
@@ -122,7 +120,6 @@ impl Session {
             state,
             difficulty: settings.difficulty,
             rng,
-            log: vec!["Round 1 begins.".to_owned()],
             selected: None,
             move_from: None,
             scene: None,
@@ -150,7 +147,7 @@ impl Session {
                     self.next_scene();
                 }
             }
-            Err(error) => self.log.push(error.to_string()),
+            Err(error) => warn!("illegal action {action:?}: {error}"),
         }
         self.selected = None;
         self.move_from = None;
@@ -160,10 +157,6 @@ impl Session {
     fn next_scene(&mut self) {
         self.scene = self.scenes.pop_front();
         if let Some(scene) = &self.scene {
-            // An action shown in two scenes is logged once.
-            if self.log.last() != Some(&scene.text) {
-                self.log.push(scene.text.clone());
-            }
             self.scene_timer = Timer::from_seconds(scene.seconds, TimerMode::Once);
         }
     }

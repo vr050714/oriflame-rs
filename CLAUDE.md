@@ -77,7 +77,7 @@ Depends only on `oriflamme-core`.
 
 - UI is plain `bevy_ui`, rebuilt from scratch: `screens::rebuild_ui` despawns the `UiRoot` tree and respawns it whenever `UiDirty` is set or the `Screen` state changes. There is no incremental UI update; to change what is shown, change state and set `UiDirty`.
 - Input: every clickable node carries a `Click` component. One global observer, `screens::on_click`, handles `On<Activate>` from `bevy::ui_widgets::Button`.
-- `game::Session` (a resource that exists only once a game has started) owns the `GameState`, the log, and the human's in-progress selections. The human is always seat 0 (`HUMAN`).
+- `game::Session` (a resource that exists only once a game has started) owns the `GameState` and the human's in-progress selections. The human is always seat 0 (`HUMAN`).
 - Playback: `Session::apply` calls `apply_traced` and turns each `Step` into one or more `Scene`s (`scenes_for` in `game.rs`): a frozen copy of the table, `Mark`s for the acting and affected cards, a sentence, and a duration. `play_scenes` advances them on a timer. While a scene is showing, `board` draws the scene's table instead of the live one, `human_turn()` is false, and `bot_turns` does nothing. Scene durations and labels live in `scenes_for`.
 - Animation: a `Motion` component (`Pulse`, `Vanish`, `Arrive`, `Bob`) plus `screens::animate`, which drives `UiTransform` from a per-node clock. Clocks restart on every UI rebuild.
 - Bots: `game::bot_turns` builds the strategy with `make_strategy` inside a task on `AsyncComputeTaskPool` and polls it with `check_ready`, so a long search does not block the window.
