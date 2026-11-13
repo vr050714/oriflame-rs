@@ -516,8 +516,8 @@ fn revealed_cards_act_again_every_round() {
     // `board` already resolved the face-up Heir once and ended the round.
     assert_eq!(state.players[0].influence, 3);
     assert_eq!(state.round, 3);
-    for p in 0..3 {
-        state.players[p].hand = vec![Conspiracy];
+    for player in &mut state.players {
+        player.hand = vec![Conspiracy];
     }
     for _ in 0..3 {
         let player = state.current_player().unwrap();
