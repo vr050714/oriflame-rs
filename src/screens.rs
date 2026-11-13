@@ -724,22 +724,58 @@ fn menu(ui: &mut ChildSpawnerCommands, settings: &Settings, art: &CardArt) {
     ui.spawn(text("Oriflamme", 72.0, GOLD));
     ui.spawn(text(t!("app-tagline"), 22.0, DIM));
 
-    ui.spawn(row(10.0)).with_children(|ui| {
-        for kind in [
-            CardKind::Lord,
-            CardKind::Heir,
-            CardKind::Spy,
-            CardKind::Archer,
-            CardKind::Ambush,
-        ] {
+    // A hand of cards in one line. When the screen is too narrow the slots
+    // shrink and the cards overlap, like cards held in a hand; the last card
+    // always stays fully visible.
+    const HAND: [CardKind; 5] = [
+        CardKind::Lord,
+        CardKind::Heir,
+        CardKind::Spy,
+        CardKind::Archer,
+        CardKind::Ambush,
+    ];
+    ui.spawn(Node {
+        width: percent(100),
+        height: px(CARD_H + 24.0),
+        flex_direction: FlexDirection::Row,
+        flex_wrap: FlexWrap::NoWrap,
+        justify_content: JustifyContent::Center,
+        align_items: AlignItems::Center,
+        column_gap: px(10),
+        ..default()
+    })
+    .with_children(|ui| {
+        let last = HAND.len().saturating_sub(1);
+        for (i, kind) in HAND.into_iter().enumerate() {
+            // Fan: rotate around the middle card, lift the middle a little.
+            let offset = i as f32 - last as f32 / 2.0;
             ui.spawn((
-                ImageNode::new(art.image(Some(kind))),
                 Node {
                     width: px(CARD_W),
                     height: px(CARD_H),
+                    min_width: px(24),
+                    flex_shrink: if i == last { 0.0 } else { 1.0 },
+                    margin: UiRect::top(px(offset * offset * 4.0)),
                     ..default()
                 },
-            ));
+                UiTransform {
+                    rotation: Rot2::degrees(offset * 5.0),
+                    ..UiTransform::IDENTITY
+                },
+            ))
+            .with_children(|ui| {
+                ui.spawn((
+                    ImageNode::new(art.image(Some(kind))),
+                    Node {
+                        position_type: PositionType::Absolute,
+                        left: px(0),
+                        top: px(0),
+                        width: px(CARD_W),
+                        height: px(CARD_H),
+                        ..default()
+                    },
+                ));
+            });
         }
     });
 
