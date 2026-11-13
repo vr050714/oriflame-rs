@@ -905,6 +905,7 @@ fn board(ui: &mut ChildSpawnerCommands, session: &Session, art: &CardArt) {
             },
         ));
         ui.spawn(Node {
+            width: percent(100),
             min_height: px(200),
             ..row(8.0)
         })
