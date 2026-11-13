@@ -349,6 +349,156 @@ fn shapeshifter_copying_the_only_heir_gains_two() {
 }
 
 #[test]
+fn shapeshifter_copying_heir_scores_for_the_shapeshifter_owner_only() {
+    // The Heir already scored for its own owner when it resolved (1 + 2).
+    let mut state = board(vec![qc(1, Heir, true, 0), qc(0, Shapeshifter, false, 0)]);
+    assert_eq!(state.players[1].influence, 3);
+    state.apply(Action::Reveal).unwrap();
+    assert_eq!(state.legal_actions(), vec![Action::Target(0)]);
+    state.apply(Action::Target(0)).unwrap();
+    assert_eq!(state.players[0].influence, 3);
+    assert_eq!(state.players[1].influence, 3);
+    assert_eq!(state.players[2].influence, 1);
+    // Nothing is discarded; both cards stay revealed in the queue.
+    assert!(state.players.iter().all(|p| p.discard.is_empty()));
+    assert_eq!(state.queue.len(), 2);
+    assert!(state.queue.iter().all(|s| s[0].face_up));
+    assert_eq!(state.round, 3);
+}
+
+#[test]
+fn shapeshifter_copying_own_heir_adds_to_the_heirs_gain() {
+    let mut state = board(vec![qc(0, Heir, true, 0), qc(0, Shapeshifter, false, 0)]);
+    assert_eq!(state.players[0].influence, 3);
+    state.apply(Action::Reveal).unwrap();
+    state.apply(Action::Target(0)).unwrap();
+    assert_eq!(state.players[0].influence, 5);
+}
+
+#[test]
+fn shapeshifter_copying_heir_gains_nothing_when_another_heir_is_revealed() {
+    // Two revealed Heirs: neither scores, and neither does a copy of one.
+    let mut state = board(vec![
+        qc(1, Heir, true, 0),
+        qc(0, Shapeshifter, false, 0),
+        qc(2, Heir, true, 0),
+    ]);
+    assert_eq!(state.players[1].influence, 1);
+    state.apply(Action::Reveal).unwrap();
+    // Both neighbouring Heirs are valid copy targets.
+    assert_eq!(
+        state.legal_actions(),
+        vec![Action::Target(0), Action::Target(2)]
+    );
+    state.apply(Action::Target(2)).unwrap();
+    for player in &state.players {
+        assert_eq!(player.influence, 1);
+    }
+    assert_eq!(state.round, 3);
+}
+
+#[test]
+fn face_down_heir_does_not_stop_a_shapeshifter_copy_from_scoring() {
+    let mut state = board(vec![
+        qc(1, Heir, true, 0),
+        qc(0, Shapeshifter, false, 0),
+        qc(2, Heir, false, 0),
+    ]);
+    // The revealed Heir was alone when it resolved.
+    assert_eq!(state.players[1].influence, 3);
+    state.apply(Action::Reveal).unwrap();
+    // The face-down Heir is not a copy target.
+    assert_eq!(state.legal_actions(), vec![Action::Target(0)]);
+    state.apply(Action::Target(0)).unwrap();
+    assert_eq!(state.players[0].influence, 3);
+    // Revealing the last Heir now finds another revealed Heir, so it scores nothing.
+    state.apply(Action::Reveal).unwrap();
+    assert_eq!(state.players[2].influence, 1);
+    assert_eq!(state.players[1].influence, 3);
+}
+
+#[test]
+fn two_shapeshifters_around_one_heir_both_score() {
+    let mut state = board(vec![
+        qc(0, Shapeshifter, false, 0),
+        qc(1, Heir, true, 0),
+        qc(2, Shapeshifter, false, 0),
+    ]);
+    state.apply(Action::Reveal).unwrap();
+    assert_eq!(state.legal_actions(), vec![Action::Target(1)]);
+    state.apply(Action::Target(1)).unwrap();
+    // The Heir resolved by itself right after the first copy.
+    assert_eq!(state.players[0].influence, 3);
+    assert_eq!(state.players[1].influence, 3);
+    // The second Shapeshifter copies the same Heir, still the only one.
+    state.apply(Action::Reveal).unwrap();
+    assert_eq!(state.legal_actions(), vec![Action::Target(1)]);
+    state.apply(Action::Target(1)).unwrap();
+    assert_eq!(state.players[2].influence, 3);
+    assert_eq!(state.players[0].influence, 3);
+    assert_eq!(state.players[1].influence, 3);
+    assert_eq!(state.round, 3);
+}
+
+#[test]
+fn two_shapeshifters_and_two_heirs_nobody_scores() {
+    let mut state = board(vec![
+        qc(1, Heir, true, 0),
+        qc(0, Shapeshifter, false, 0),
+        qc(2, Heir, true, 0),
+        qc(1, Shapeshifter, false, 0),
+    ]);
+    state.apply(Action::Reveal).unwrap();
+    state.apply(Action::Target(0)).unwrap();
+    state.apply(Action::Reveal).unwrap();
+    assert_eq!(state.legal_actions(), vec![Action::Target(2)]);
+    state.apply(Action::Target(2)).unwrap();
+    for player in &state.players {
+        assert_eq!(player.influence, 1);
+    }
+    assert_eq!(state.round, 3);
+}
+
+#[test]
+fn adjacent_shapeshifters_cannot_copy_each_other() {
+    let mut state = board(vec![
+        qc(2, Lord, true, 0),
+        qc(0, Shapeshifter, false, 0),
+        qc(1, Shapeshifter, false, 0),
+    ]);
+    // The Lord resolved alone: +1 for its owner.
+    assert_eq!(state.players[2].influence, 2);
+    state.apply(Action::Reveal).unwrap();
+    // The face-down neighbour is no target, only the Lord is.
+    assert_eq!(state.legal_actions(), vec![Action::Target(0)]);
+    state.apply(Action::Target(0)).unwrap();
+    // Copied Lord: no friendly neighbour, so +1 only.
+    assert_eq!(state.players[0].influence, 2);
+    // The second Shapeshifter only has a revealed Shapeshifter beside it:
+    // nothing to copy, so revealing it does nothing.
+    state.apply(Action::Reveal).unwrap();
+    assert_eq!(state.players[1].influence, 1);
+    assert_eq!(state.players[0].influence, 2);
+    assert_eq!(state.players[2].influence, 2);
+    assert_eq!(state.round, 3);
+}
+
+#[test]
+fn two_shapeshifters_in_a_row_with_no_character_do_nothing() {
+    let mut state = board(vec![
+        qc(0, Shapeshifter, false, 0),
+        qc(1, Shapeshifter, false, 0),
+    ]);
+    state.apply(Action::Reveal).unwrap();
+    state.apply(Action::Reveal).unwrap();
+    for player in &state.players {
+        assert_eq!(player.influence, 1);
+    }
+    assert!(state.queue.iter().all(|s| s[0].face_up));
+    assert_eq!(state.round, 3);
+}
+
+#[test]
 fn covered_card_is_inactive_until_uncovered() {
     let mut state = board(vec![qc(1, Soldier, false, 0), qc(0, Heir, true, 0)]);
     state.queue[1].push(qc(0, Spy, false, 0));
