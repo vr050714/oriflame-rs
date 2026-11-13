@@ -306,9 +306,12 @@ fn scenes_for(step: Step) -> Vec<Scene> {
             by_pos, target_pos, ..
         } => {
             turn_up(target_pos);
-            let mut marks: Vec<Mark> = actor(by_pos.filter(|&pos| pos != target_pos), Some(Label::Gain(1)))
-                .into_iter()
-                .collect();
+            let mut marks: Vec<Mark> = actor(
+                by_pos.filter(|&pos| pos != target_pos),
+                Some(Label::Gain(1)),
+            )
+            .into_iter()
+            .collect();
             marks.push(Mark::new(
                 target_pos,
                 Role::Target,
@@ -324,9 +327,12 @@ fn scenes_for(step: Step) -> Vec<Scene> {
             ..
         } => {
             turn_up(target_pos);
-            let mut marks: Vec<Mark> = actor(by_pos.filter(|&pos| pos != target_pos), Some(Label::Gain(1)))
-                .into_iter()
-                .collect();
+            let mut marks: Vec<Mark> = actor(
+                by_pos.filter(|&pos| pos != target_pos),
+                Some(Label::Gain(1)),
+            )
+            .into_iter()
+            .collect();
             marks.push(Mark::new(
                 target_pos,
                 Role::Target,
@@ -336,11 +342,21 @@ fn scenes_for(step: Step) -> Vec<Scene> {
             vec![Scene::new(before, event, marks, 1.8)]
         }
         Event::Discarded { pos, .. } => {
-            let marks = vec![Mark::new(pos, Role::Target, Some(Label::Discarded), Motion::Vanish)];
+            let marks = vec![Mark::new(
+                pos,
+                Role::Target,
+                Some(Label::Discarded),
+                Motion::Vanish,
+            )];
             vec![Scene::new(before, event, marks, 1.3)]
         }
         Event::Moved { from, to, .. } => {
-            let leaving = vec![Mark::new(from, Role::Target, Some(Label::Moves), Motion::Vanish)];
+            let leaving = vec![Mark::new(
+                from,
+                Role::Target,
+                Some(Label::Moves),
+                Motion::Vanish,
+            )];
             let arriving = vec![Mark::new(to, Role::Actor, None, Motion::Arrive)];
             vec![
                 Scene::new(before, event, leaving, 1.2),

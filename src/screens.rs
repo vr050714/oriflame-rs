@@ -275,6 +275,10 @@ pub fn hover_style(
 }
 
 /// Rebuilds the screen after a change.
+#[allow(
+    clippy::too_many_arguments,
+    reason = "Bevy systems take one parameter per resource"
+)]
 pub fn rebuild_ui(
     mut commands: Commands,
     mut dirty: ResMut<UiDirty>,
@@ -546,7 +550,11 @@ fn card(ui: &mut ChildSpawnerCommands, art: &CardArt, look: CardLook) {
         ui.spawn(text(look.caption, 14.0, PAPER));
         if let Some(note) = look.note {
             // An empty text node has no height, so a blank line needs a space.
-            let note = if note.is_empty() { " ".to_owned() } else { note };
+            let note = if note.is_empty() {
+                " ".to_owned()
+            } else {
+                note
+            };
             ui.spawn(text(note, 12.0, DIM));
         }
     });
@@ -682,12 +690,7 @@ fn menu(ui: &mut ChildSpawnerCommands, settings: &Settings, art: &CardArt) {
                 Difficulty::Medium => t!("level-medium"),
                 Difficulty::Hard => t!("level-hard"),
             };
-            button(
-                ui,
-                &name,
-                Click::Level(level),
-                settings.difficulty == level,
-            );
+            button(ui, &name, Click::Level(level), settings.difficulty == level);
         }
     });
 
