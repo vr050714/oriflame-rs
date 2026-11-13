@@ -16,6 +16,7 @@ use bevy::{
     picking::hover::Hovered,
     prelude::*,
     ui_widgets::{Activate, Button},
+    window::PrimaryWindow,
 };
 use oriflamme_ai::Difficulty;
 use oriflamme_core::{
@@ -47,7 +48,74 @@ const ART_H: f32 = 118.0;
 const INFO_W: f32 = 640.0;
 const INFO_H: f32 = 96.0;
 /// Log lines shown on the board.
-const LOG_LINES: usize = 7;
+const LOG_LINES: usize = 4;
+
+/// Design size of the screens, in UI pixels, at scale 1. The board is about
+/// this tall with one row of cards; each further row of the queue adds
+/// `ROW_EXTRA_H`.
+const BOARD_H: f32 = 830.0;
+const ROW_EXTRA_H: f32 = 190.0;
+const BOARD_MIN_W: f32 = 680.0;
+const MENU_H: f32 = 640.0;
+const MENU_MIN_W: f32 = 560.0;
+/// Width of a queue card with its gap, and the extra width of a Royal Decree
+/// "move here" button between two cards.
+const QUEUE_SLOT_W: f32 = 112.0;
+const DECREE_GAP_W: f32 = 110.0;
+/// Smallest scale; below it the text is too small to read.
+const MIN_SCALE: f32 = 0.5;
+
+/// Shrinks the whole interface so that it fits the window: the largest scale
+/// up to 1 at which the board, with its queue wrapped into as many rows as
+/// the width forces, is not taller than the window.
+pub fn fit_ui_scale(
+    mut scale: ResMut<UiScale>,
+    windows: Query<&Window, With<PrimaryWindow>>,
+    screen: Res<State<Screen>>,
+    session: Option<Res<Session>>,
+) {
+    let Ok(window) = windows.single() else {
+        return;
+    };
+    let (width, height) = (window.width(), window.height());
+    if width <= 0.0 || height <= 0.0 {
+        return;
+    }
+    let (min_w, base_h, stacks, slot_w) = match (screen.get(), session.as_deref()) {
+        (Screen::Playing, Some(session)) => {
+            let queue = session
+                .scene
+                .as_ref()
+                .map_or(session.state.queue.len(), |s| s.queue.len());
+            let slot = if session.move_from.is_some() {
+                QUEUE_SLOT_W + DECREE_GAP_W
+            } else {
+                QUEUE_SLOT_W
+            };
+            (BOARD_MIN_W, BOARD_H, queue, slot)
+        }
+        (Screen::GameOver, _) => (MENU_MIN_W, MENU_H * 0.7, 0, QUEUE_SLOT_W),
+        _ => (MENU_MIN_W, MENU_H, 0, QUEUE_SLOT_W),
+    };
+    let mut best = MIN_SCALE;
+    let mut candidate = 1.0_f32;
+    while candidate >= MIN_SCALE {
+        let avail_w = width / candidate;
+        let avail_h = height / candidate;
+        // Panel padding and the page margin.
+        let per_row = ((avail_w - 60.0) / slot_w).floor().max(1.0);
+        let rows = (stacks as f32 / per_row).ceil().max(1.0);
+        let needed_h = base_h + (rows - 1.0) * ROW_EXTRA_H;
+        if avail_w >= min_w && needed_h <= avail_h {
+            best = candidate;
+            break;
+        }
+        candidate -= 0.025;
+    }
+    if (scale.0 - best).abs() > 0.001 {
+        scale.0 = best;
+    }
+}
 
 /// Family colour of each seat.
 fn family_color(player: PlayerId) -> Color {
@@ -822,6 +890,7 @@ fn board(ui: &mut ChildSpawnerCommands, session: &Session, art: &CardArt) {
     ui.spawn((
         Node {
             padding: UiRect::all(px(10)),
+            max_width: percent(100),
             ..column(4.0)
         },
         BackgroundColor(PANEL),

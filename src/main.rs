@@ -56,7 +56,12 @@ fn main() -> AppExit {
     )
     .add_systems(
         Update,
-        (screens::rebuild_ui, screens::hover_style, screens::animate),
+        (
+            screens::fit_ui_scale,
+            screens::rebuild_ui,
+            screens::hover_style,
+            screens::animate,
+        ),
     )
     .add_observer(screens::on_click);
     #[cfg(not(target_arch = "wasm32"))]
