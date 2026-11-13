@@ -5,7 +5,9 @@
 
 use crate::{
     Screen,
-    game::{BotTurn, HUMAN, Mark, Role, Session, Settings, player_name},
+    game::{BotTurn, HUMAN, Mark, Role, Session, Settings, describe, player_name},
+    i18n::{self, Language, card_description, card_name},
+    t,
 };
 use bevy::{
     asset::RenderAssetUsages,
@@ -171,6 +173,10 @@ pub fn animate(time: Res<Time>, mut nodes: Query<(&Motion, &mut MotionClock, &mu
 #[derive(Resource)]
 pub struct UiDirty(pub bool);
 
+/// True while the language list under the language button is open.
+#[derive(Resource, Default)]
+pub struct LanguageMenu(pub bool);
+
 /// Root node of the current screen.
 #[derive(Component)]
 pub struct UiRoot;
@@ -195,6 +201,9 @@ pub enum Click {
     /// Royal Decree: pick the card to move.
     MoveFrom(usize),
     CancelMove,
+    /// Open or close the language list.
+    LanguageMenu,
+    Language(Language),
 }
 
 /// Handles every button press.
@@ -211,12 +220,17 @@ pub fn on_click(
     mut bot: ResMut<BotTurn>,
     mut dirty: ResMut<UiDirty>,
     mut next: ResMut<NextState<Screen>>,
+    mut language_menu: ResMut<LanguageMenu>,
 ) {
     let Ok(&click) = clicks.get(event.entity) else {
         return;
     };
     dirty.0 = true;
+    // Any click closes the language list; its own button toggles it.
+    let menu_was_open = std::mem::take(&mut language_menu.0);
     match click {
+        Click::LanguageMenu => language_menu.0 = !menu_was_open,
+        Click::Language(language) => i18n::set_language(language),
         Click::Players(count) => settings.players = count,
         Click::Level(difficulty) => settings.difficulty = difficulty,
         Click::Start => match Session::new(*settings) {
@@ -269,6 +283,7 @@ pub fn rebuild_ui(
     settings: Res<Settings>,
     session: Option<Res<Session>>,
     art: Res<CardArt>,
+    language_menu: Res<LanguageMenu>,
 ) {
     if !dirty.0 && !screen.is_changed() {
         return;
@@ -295,6 +310,82 @@ pub fn rebuild_ui(
         (Screen::GameOver, Some(session)) => game_over(ui, session),
         _ => menu(ui, &settings, &art),
     });
+    root.with_children(|ui| language_picker(ui, language_menu.0));
+}
+
+/// The language drop-down in the top right corner: a button with the current
+/// language and, when open, the list of languages under it.
+fn language_picker(ui: &mut ChildSpawnerCommands, open: bool) {
+    let current = i18n::language();
+    ui.spawn((
+        Node {
+            position_type: PositionType::Absolute,
+            top: px(12),
+            right: px(12),
+            flex_direction: FlexDirection::Column,
+            align_items: AlignItems::Stretch,
+            row_gap: px(4),
+            ..default()
+        },
+        // Drawn over the screen, so the open list covers what is under it.
+        GlobalZIndex(10),
+    ))
+    .with_children(|ui| {
+        ui.spawn((
+            Button,
+            Hovered::default(),
+            Click::LanguageMenu,
+            RestBorder(INK),
+            Node {
+                padding: UiRect::axes(px(14), px(7)),
+                border: UiRect::all(px(3)),
+                border_radius: BorderRadius::all(px(10)),
+                align_items: AlignItems::Center,
+                justify_content: JustifyContent::SpaceBetween,
+                column_gap: px(12),
+                ..default()
+            },
+            BackgroundColor(PANEL),
+            BorderColor::all(INK),
+        ))
+        .with_children(|ui| {
+            ui.spawn(text(current.native_name(), 18.0, PAPER));
+            caret(ui, open);
+        });
+        if open {
+            for language in Language::ALL {
+                button(
+                    ui,
+                    language.native_name(),
+                    Click::Language(language),
+                    language == current,
+                );
+            }
+        }
+    });
+}
+
+/// A small chevron: pointing down when the list is closed, up when open.
+fn caret(ui: &mut ChildSpawnerCommands, open: bool) {
+    let angle = if open { -135.0_f32 } else { 45.0_f32 };
+    ui.spawn((
+        Node {
+            width: px(8),
+            height: px(8),
+            border: UiRect {
+                right: px(2),
+                bottom: px(2),
+                ..default()
+            },
+            margin: UiRect::top(px(if open { 4 } else { -4 })),
+            ..default()
+        },
+        BorderColor::all(PAPER),
+        UiTransform {
+            rotation: Rot2::degrees(angle),
+            ..UiTransform::IDENTITY
+        },
+    ));
 }
 
 fn text(content: impl Into<String>, size: f32, color: Color) -> impl Bundle {
@@ -365,7 +456,7 @@ struct CardLook<'a> {
     caption: String,
     /// Second caption line. `Some("")` keeps the line empty so that cards in
     /// one row stay aligned; `None` leaves the line out.
-    note: Option<&'static str>,
+    note: Option<String>,
     /// Arrow above the card. `Some(false)` leaves the space empty so that
     /// cards in one row stay aligned; `None` leaves the space out.
     arrow: Option<bool>,
@@ -449,13 +540,14 @@ fn card(ui: &mut ChildSpawnerCommands, art: &CardArt, look: CardLook) {
             if let Some(mark) = look.mark
                 && let Some(label) = &mark.label
             {
-                effect_label(ui, label, mark.role);
+                effect_label(ui, &label.text(), mark.role);
             }
         });
         ui.spawn(text(look.caption, 14.0, PAPER));
         if let Some(note) = look.note {
             // An empty text node has no height, so a blank line needs a space.
-            ui.spawn(text(if note.is_empty() { " " } else { note }, 12.0, DIM));
+            let note = if note.is_empty() { " ".to_owned() } else { note };
+            ui.spawn(text(note, 12.0, DIM));
         }
     });
 }
@@ -515,7 +607,7 @@ fn place_slot(ui: &mut ChildSpawnerCommands, slot: Slot) {
             },
             BackgroundColor(FELT),
             BorderColor::all(GOLD),
-            children![text("Place", 18.0, GOLD), text("here", 18.0, GOLD)],
+            children![text(t!("place"), 18.0, GOLD), text(t!("here"), 18.0, GOLD)],
         ));
         // Blank caption lines keep the slot level with the cards beside it.
         ui.spawn(text(" ", 14.0, PAPER));
@@ -552,12 +644,8 @@ fn menu(ui: &mut ChildSpawnerCommands, settings: &Settings, art: &CardArt) {
         height: px(30),
         ..default()
     });
-    ui.spawn(text("Oriflamme", 72.0, GOLD));
-    ui.spawn(text(
-        "Intrigue for the crown, against the computer",
-        22.0,
-        DIM,
-    ));
+    ui.spawn(text(t!("app-title"), 72.0, GOLD));
+    ui.spawn(text(t!("app-tagline"), 22.0, DIM));
 
     ui.spawn(row(10.0)).with_children(|ui| {
         for kind in [
@@ -578,20 +666,25 @@ fn menu(ui: &mut ChildSpawnerCommands, settings: &Settings, art: &CardArt) {
         }
     });
 
-    ui.spawn(text("Players", 24.0, PAPER));
+    ui.spawn(text(t!("players"), 24.0, PAPER));
     ui.spawn(row(10.0)).with_children(|ui| {
         for count in MIN_PLAYERS..=MAX_PLAYERS {
-            let label = format!("{count}  (you + {} PC)", count.saturating_sub(1));
+            let label = t!("player-count", count = count, pcs = count.saturating_sub(1));
             button(ui, &label, Click::Players(count), settings.players == count);
         }
     });
 
-    ui.spawn(text("Computer strength", 24.0, PAPER));
+    ui.spawn(text(t!("strength"), 24.0, PAPER));
     ui.spawn(row(10.0)).with_children(|ui| {
         for level in Difficulty::ALL {
+            let name = match level {
+                Difficulty::Easy => t!("level-easy"),
+                Difficulty::Medium => t!("level-medium"),
+                Difficulty::Hard => t!("level-hard"),
+            };
             button(
                 ui,
-                level.name(),
+                &name,
                 Click::Level(level),
                 settings.difficulty == level,
             );
@@ -602,42 +695,39 @@ fn menu(ui: &mut ChildSpawnerCommands, settings: &Settings, art: &CardArt) {
         height: px(10),
         ..default()
     });
-    button(ui, "Start game", Click::Start, true);
+    button(ui, &t!("start-game"), Click::Start, true);
 }
 
 /// What the human should do now, or who is moving.
 fn prompt(session: &Session) -> String {
     let state = &session.state;
     let Some(player) = state.current_player() else {
-        return "The game is over.".to_owned();
+        return t!("game-is-over");
     };
     if player != HUMAN {
-        return format!("{} is thinking...", player_name(player));
+        return t!("thinking", player = player_name(player));
     }
     match state.phase {
         Phase::Placement { .. } => match session.selected {
-            None => "Your turn: pick a card from your hand.".to_owned(),
-            Some(kind) => format!("Pick where to place your {kind}. It goes face down."),
+            None => t!("pick-hand-card"),
+            Some(kind) => t!("pick-place", card = card_name(kind)),
         },
         Phase::Resolution {
             card,
             decision: Decision::RevealOrNot,
-        } => format!(
-            "Your {} (marked): reveal it, or keep it hidden and add 1 influence to it?",
-            card.kind
-        ),
+        } => t!("reveal-or-not", card = card_name(card.kind)),
         Phase::Resolution {
             decision: Decision::Ability(CardKind::RoyalDecree),
             ..
         } => match session.move_from {
-            None => "Royal Decree: pick the card to move.".to_owned(),
-            Some(_) => "Royal Decree: pick the new place for the card.".to_owned(),
+            None => t!("decree-pick-card"),
+            Some(_) => t!("decree-pick-place"),
         },
         Phase::Resolution {
             decision: Decision::Ability(kind),
             ..
-        } => format!("{kind}: pick a highlighted card."),
-        Phase::GameOver => "The game is over.".to_owned(),
+        } => t!("pick-target", card = card_name(kind)),
+        Phase::GameOver => t!("game-is-over"),
     }
 }
 
@@ -659,11 +749,11 @@ fn board(ui: &mut ChildSpawnerCommands, session: &Session, art: &CardArt) {
 
     ui.spawn(row(24.0)).with_children(|ui| {
         ui.spawn(text(
-            format!("Round {} of {ROUNDS}", state.round),
+            t!("round-of", round = state.round, rounds = ROUNDS),
             26.0,
             GOLD,
         ));
-        button(ui, "Menu", Click::Menu, false);
+        button(ui, &t!("menu"), Click::Menu, false);
     });
 
     // Scores.
@@ -695,14 +785,14 @@ fn board(ui: &mut ChildSpawnerCommands, session: &Session, art: &CardArt) {
                         BackgroundColor(family_color(player)),
                     ),
                     text(player_name(player), 20.0, PAPER),
-                    text(format!("{influence} influence"), 20.0, GOLD),
-                    text(format!("{} in hand", info.hand.len()), 16.0, DIM),
+                    text(t!("influence", amount = influence), 20.0, GOLD),
+                    text(t!("in-hand", count = info.hand.len()), 16.0, DIM),
                 ],
             ));
         }
     });
 
-    let headline = scene.map_or_else(|| prompt(session), |scene| scene.text.clone());
+    let headline = scene.map_or_else(|| prompt(session), |scene| describe(scene.event));
     ui.spawn(text(headline, 22.0, PAPER));
 
     // The card the arrow points at: the one acting in the scene, or the one
@@ -747,7 +837,7 @@ fn board(ui: &mut ChildSpawnerCommands, session: &Session, art: &CardArt) {
         })
         .with_children(|ui| {
             if queue.is_empty() && !can_place(Slot::Left) {
-                ui.spawn(text("The queue is empty.", 20.0, DIM));
+                ui.spawn(text(t!("queue-empty"), 20.0, DIM));
             }
             if can_place(Slot::Left) {
                 place_slot(ui, Slot::Left);
@@ -772,11 +862,11 @@ fn board(ui: &mut ChildSpawnerCommands, session: &Session, art: &CardArt) {
                 };
                 let mine = top.card.owner == HUMAN;
                 let (caption, note) = if top.face_up {
-                    (top.card.kind.name(), "")
+                    (card_name(top.card.kind), String::new())
                 } else if mine {
-                    (top.card.kind.name(), "(hidden)")
+                    (card_name(top.card.kind), t!("hidden"))
                 } else {
-                    ("face down", "")
+                    (t!("face-down"), String::new())
                 };
                 card(
                     ui,
@@ -791,7 +881,7 @@ fn board(ui: &mut ChildSpawnerCommands, session: &Session, art: &CardArt) {
                             || pointed == Some(pos)
                             || session.move_from == Some(pos),
                         click,
-                        caption: caption.to_owned(),
+                        caption,
                         note: Some(note),
                         arrow: Some(pointed == Some(pos)),
                         mark: scene
@@ -809,16 +899,16 @@ fn board(ui: &mut ChildSpawnerCommands, session: &Session, art: &CardArt) {
     // Choices that are not a card on the table.
     ui.spawn(row(10.0)).with_children(|ui| {
         if legal.contains(&Action::Reveal) {
-            button(ui, "Reveal", Click::Do(Action::Reveal), true);
-            button(ui, "Keep hidden (+1)", Click::Do(Action::KeepHidden), false);
+            button(ui, &t!("reveal"), Click::Do(Action::Reveal), true);
+            button(ui, &t!("keep-hidden"), Click::Do(Action::KeepHidden), false);
         }
         if session.move_from.is_some() {
-            button(ui, "Pick another card", Click::CancelMove, false);
+            button(ui, &t!("pick-another"), Click::CancelMove, false);
         }
     });
 
     // The human's hand.
-    ui.spawn(text("Your hand", 18.0, DIM));
+    ui.spawn(text(t!("your-hand"), 18.0, DIM));
     ui.spawn(row(8.0)).with_children(|ui| {
         let my_turn_to_place =
             session.human_turn() && matches!(state.phase, Phase::Placement { .. });
@@ -834,7 +924,7 @@ fn board(ui: &mut ChildSpawnerCommands, session: &Session, art: &CardArt) {
                     depth: 1,
                     click: my_turn_to_place.then_some(Click::Hand(kind)),
                     highlight: session.selected == Some(kind),
-                    caption: kind.name().to_owned(),
+                    caption: card_name(kind),
                     note: None,
                     arrow: None,
                     mark: None,
@@ -848,7 +938,7 @@ fn board(ui: &mut ChildSpawnerCommands, session: &Session, art: &CardArt) {
     ui.spawn(column(2.0)).with_children(|ui| {
         let start = session.log.len().saturating_sub(LOG_LINES);
         for line in session.log.iter().skip(start) {
-            ui.spawn(text(line.clone(), 15.0, DIM));
+            ui.spawn(text(line.text(), 15.0, DIM));
         }
     });
 }
@@ -858,7 +948,7 @@ fn board(ui: &mut ChildSpawnerCommands, session: &Session, art: &CardArt) {
 /// decision.
 fn focused_card(session: &Session) -> Option<(String, CardKind)> {
     if let Some(kind) = session.selected {
-        return Some((kind.name().to_owned(), kind));
+        return Some((card_name(kind), kind));
     }
     if !session.human_turn() {
         return None;
@@ -871,10 +961,14 @@ fn focused_card(session: &Session) -> Option<(String, CardKind)> {
         Decision::Ability(kind) => kind,
     };
     let title = if kind == card.kind {
-        kind.name().to_owned()
+        card_name(kind)
     } else {
         // A Shapeshifter using the ability it copies.
-        format!("{} (copying {kind})", card.kind)
+        t!(
+            "copying",
+            card = card_name(card.kind),
+            copied = card_name(kind)
+        )
     };
     Some((title, kind))
 }
@@ -903,14 +997,10 @@ fn card_info(ui: &mut ChildSpawnerCommands, session: &Session) {
     .with_children(|ui| match focus {
         Some((title, kind)) => {
             ui.spawn(text(title, 20.0, GOLD));
-            ui.spawn(text(kind.description(), 18.0, PAPER));
+            ui.spawn(text(card_description(kind), 18.0, PAPER));
         }
         None if may_pick => {
-            ui.spawn(text(
-                "Pick a card from your hand to see what it does.",
-                18.0,
-                DIM,
-            ));
+            ui.spawn(text(t!("pick-to-see"), 18.0, DIM));
         }
         None => {}
     });
@@ -937,7 +1027,7 @@ fn move_gap(ui: &mut ChildSpawnerCommands, session: &Session, legal: &[Action], 
     // A lone card has the same destination on both of its sides; offer it once.
     let duplicate = lone && gap == from.saturating_add(1);
     if legal.contains(&action) && !duplicate {
-        button(ui, "Here", Click::Do(action), true);
+        button(ui, &t!("move-here"), Click::Do(action), true);
     }
 }
 
@@ -946,14 +1036,13 @@ fn game_over(ui: &mut ChildSpawnerCommands, session: &Session) {
     let winners = state.winners();
     let headline = if winners.contains(&HUMAN) {
         if winners.len() == 1 {
-            "You win!"
+            t!("you-win")
         } else {
-            "You share the win!"
+            t!("you-share-win")
         }
-        .to_owned()
     } else {
         let names: Vec<String> = winners.iter().map(|&p| player_name(p)).collect();
-        format!("{} won", names.join(" and "))
+        t!("winners", names = names.join(&t!("and")))
     };
     ui.spawn(Node {
         height: px(60),
@@ -978,15 +1067,11 @@ fn game_over(ui: &mut ChildSpawnerCommands, session: &Session) {
                 BorderColor::all(family_color(player)),
                 children![
                     text(player_name(player), 26.0, PAPER),
-                    text(format!("{score} influence"), 26.0, GOLD),
+                    text(t!("influence", amount = score), 26.0, GOLD),
                 ],
             ));
         }
     });
-    ui.spawn(text(
-        "Ties are broken by the number of cards left in the queue.",
-        16.0,
-        DIM,
-    ));
-    button(ui, "Back to menu", Click::Menu, true);
+    ui.spawn(text(t!("tie-break"), 16.0, DIM));
+    button(ui, &t!("back-to-menu"), Click::Menu, true);
 }

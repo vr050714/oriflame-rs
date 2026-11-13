@@ -35,7 +35,7 @@ python -m http.server -d dist               # serve dist/ locally
 
 - A cold Bevy build takes 10 to 25 minutes and a lot of memory on this machine. Use `-j 4` if memory is short. Changing Bevy features or adding a dependency that Bevy shares (for example `winit`) triggers a full rebuild.
 - `cargo build --release` fails to overwrite the exe while the game is running. Close the game first.
-- The root package has no tests; `cargo test` at the root only matters for the two library crates.
+- The root package has one test module, `i18n::tests` (`cargo test -p oriflamme-rs i18n`), which checks the translation files.
 
 ## Lints: no panics, no unsafe
 
@@ -82,6 +82,8 @@ Depends only on `oriflamme-core`.
 - Animation: a `Motion` component (`Pulse`, `Vanish`, `Arrive`, `Bob`) plus `screens::animate`, which drives `UiTransform` from a per-node clock. Clocks restart on every UI rebuild.
 - Bots: `game::bot_turns` builds the strategy with `make_strategy` inside a task on `AsyncComputeTaskPool` and polls it with `check_ready`, so a long search does not block the window.
 - Images are compiled into the exe with `include_bytes!` and decoded once into the `CardArt` resource (`screens.rs`). The game does not use the asset server for them, so the exe runs from any folder. Adding an image means adding it to `CardArt`.
+- Text: every string shown on screen comes from `locales/<tag>.ftl` (Fluent, via `fluent-bundle`), never from a literal in the code. `i18n.rs` holds the `Language` enum, the current language (a global, switched with `set_language`), and the `t!("key", name = value)` macro. Card names and rules text are `card-<slug>` and `card-<slug>-text`; the English strings in `oriflamme-core` (`CardKind::name`, `description`) are not shown. Translation happens while the UI is drawn: the log stores `LogLine`s and scenes store `Event`s, so a language change only needs `UiDirty`. `en.ftl` is the reference; a test checks that every `.ftl` has exactly its message ids. To add a language, add a `Language` variant and its `.ftl` file. The drop-down in the top right corner is `screens::language_picker`.
+- Font: Bevy's `default_font` (ASCII only) is turned off. `main::install_font` puts `assets/fonts/FiraMono-Regular.ttf` (Fira Mono reduced to Latin, Latin Extended and Cyrillic, OFL) into the default font handle. A language with other letters needs a font that has them.
 - `main.rs` forces the DX12 backend on Windows unless `WGPU_BACKEND` is set: the Vulkan driver on the development machine's Intel GPU segfaults at start-up.
 - Bevy is built with `default-features = false` and a UI-only feature list in `Cargo.toml`. A missing Bevy type usually means a missing feature there.
 - `build.rs` embeds `assets/icon.ico` into the exe with `winresource`; `set_window_icon` in `icon.rs` (native only) sets the title-bar icon at run time through `WINIT_WINDOWS`.

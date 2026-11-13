@@ -29,7 +29,6 @@ bevy = { version = "0.20.1", default-features = false, features = [
     "bevy_render",
     "bevy_core_pipeline",
     "bevy_text",
-    "default_font",
     "bevy_ui",
     "bevy_ui_render",
     "bevy_ui_widgets",
@@ -41,6 +40,9 @@ oriflamme-core = { path = "crates/oriflamme-core" }
 oriflamme-ai = { path = "crates/oriflamme-ai" }
 # `SystemTime` that works in the browser; re-exports `std::time` on native.
 web-time = "1.1"
+# Localisation: Fluent messages (`locales/*.ftl`), compiled into the exe.
+fluent-bundle = "0.16"
+unic-langid = "0.9"
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 bevy = { version = "0.20.1", default-features = false, features = ["multi_threaded", "x11", "wayland"] }
