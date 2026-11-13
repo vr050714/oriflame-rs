@@ -2,7 +2,6 @@
 
 ## Menu
 
-app-title = Орифлама
 app-tagline = Сплетке за круну, против рачунара
 players = Играчи
 player-count = { $count }  (ви + { $pcs } ПЦ)

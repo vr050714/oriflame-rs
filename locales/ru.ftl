@@ -2,7 +2,6 @@
 
 ## Menu
 
-app-title = Орифламма
 app-tagline = Интриги за корону — против компьютера
 players = Игроки
 player-count = { $count }  (вы + { $pcs } ПК)

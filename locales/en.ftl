@@ -3,7 +3,6 @@
 
 ## Menu
 
-app-title = Oriflamme
 app-tagline = Intrigue for the crown, against the computer
 players = Players
 player-count = { $count }  (you + { $pcs } PC)

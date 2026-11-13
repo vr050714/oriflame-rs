@@ -652,7 +652,8 @@ fn menu(ui: &mut ChildSpawnerCommands, settings: &Settings, art: &CardArt) {
         height: px(30),
         ..default()
     });
-    ui.spawn(text(t!("app-title"), 72.0, GOLD));
+    // The game's name is not translated.
+    ui.spawn(text("Oriflamme", 72.0, GOLD));
     ui.spawn(text(t!("app-tagline"), 22.0, DIM));
 
     ui.spawn(row(10.0)).with_children(|ui| {
