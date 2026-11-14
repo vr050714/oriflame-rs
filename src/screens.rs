@@ -221,7 +221,7 @@ pub struct MotionClock(f32);
 
 /// Moves every node that has a [`Motion`].
 pub fn animate(time: Res<Time>, mut nodes: Query<(&Motion, &mut MotionClock, &mut UiTransform)>) {
-    // A slower speed stretches every animation by the same factor as the scenes.
+    // A slower speed stretches every animation; scene lengths stay the same.
     let step = time.delta_secs() / speed().factor();
     for (motion, mut clock, mut transform) in &mut nodes {
         clock.0 += step;
@@ -314,10 +314,7 @@ pub fn on_click(
         Click::LanguageMenu => language_menu.0 = !language_was_open,
         Click::Language(language) => i18n::set_language(language),
         Click::SpeedMenu => speed_menu.0 = !speed_was_open,
-        Click::Speed(new_speed) => {
-            set_speed(new_speed);
-            bot.reset();
-        }
+        Click::Speed(new_speed) => set_speed(new_speed),
         Click::Players(count) => settings.players = count,
         Click::Level(difficulty) => settings.difficulty = difficulty,
         Click::Start => match Session::new(*settings) {

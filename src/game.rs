@@ -19,7 +19,6 @@ use oriflamme_core::{
 use std::{
     collections::VecDeque,
     sync::atomic::{AtomicU8, Ordering},
-    time::Duration,
 };
 use web_time::{SystemTime, UNIX_EPOCH};
 
@@ -29,13 +28,13 @@ pub const HUMAN: PlayerId = 0;
 /// Seconds a computer player waits before it starts to think.
 const BOT_DELAY: f32 = 0.5;
 
-/// How fast the playback of events runs. It scales every pause: the length of
-/// each scene and the wait before a computer player moves.
+/// How fast the animations of the playback run. Scene lengths and the wait
+/// before a computer player moves do not depend on it.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum Speed {
     #[default]
     Normal,
-    /// 30 percent longer pauses, for new players.
+    /// Animations take 20 percent longer, for new players.
     Slow,
 }
 
@@ -43,11 +42,11 @@ impl Speed {
     /// Every speed, in the order of the speed menu.
     pub const ALL: [Speed; 2] = [Speed::Normal, Speed::Slow];
 
-    /// Multiplier for every duration.
+    /// Multiplier for the duration of every animation.
     pub fn factor(self) -> f32 {
         match self {
             Speed::Normal => 1.0,
-            Speed::Slow => 1.3,
+            Speed::Slow => 1.2,
         }
     }
 
@@ -63,7 +62,7 @@ impl Speed {
 /// The speed in use, as an index into [`Speed::ALL`].
 static SPEED: AtomicU8 = AtomicU8::new(0);
 
-/// Switches the playback speed. Takes effect from the next scene.
+/// Switches the animation speed. Takes effect at once.
 pub fn set_speed(speed: Speed) {
     let index = Speed::ALL.iter().position(|&s| s == speed).unwrap_or(0);
     SPEED.store(u8::try_from(index).unwrap_or(0), Ordering::Relaxed);
@@ -261,8 +260,7 @@ impl Session {
             if self.log.last() != Some(&line) {
                 self.log.push(line);
             }
-            self.scene_timer =
-                Timer::from_seconds(scene.seconds * speed().factor(), TimerMode::Once);
+            self.scene_timer = Timer::from_seconds(scene.seconds, TimerMode::Once);
         }
     }
 }
@@ -514,8 +512,6 @@ impl BotTurn {
     /// Drops any move being computed and restarts the delay.
     pub fn reset(&mut self) {
         self.task = None;
-        self.timer
-            .set_duration(Duration::from_secs_f32(BOT_DELAY * speed().factor()));
         self.timer.reset();
     }
 }
