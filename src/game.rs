@@ -16,7 +16,10 @@ use oriflamme_core::{
     Action, CardKind, Event, GameState, MIN_PLAYERS, PlayerId, Rng64, RuleError, SetupError, Slot,
     Snapshot, Stack, Step,
 };
-use std::collections::VecDeque;
+use std::{
+    collections::VecDeque,
+    sync::atomic::{AtomicU8, Ordering},
+};
 use web_time::{SystemTime, UNIX_EPOCH};
 
 /// The human always sits in seat 0.
@@ -24,6 +27,53 @@ pub const HUMAN: PlayerId = 0;
 
 /// Seconds a computer player waits before it starts to think.
 const BOT_DELAY: f32 = 0.5;
+
+/// How fast the animations of the playback run. Scene lengths and the wait
+/// before a computer player moves do not depend on it.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum Speed {
+    /// Animations run 20 percent faster than on the main branch.
+    #[default]
+    Normal,
+    /// Animations take 30 percent longer than on the main branch, for new players.
+    Slow,
+}
+
+impl Speed {
+    /// Every speed, in the order of the speed menu.
+    pub const ALL: [Speed; 2] = [Speed::Normal, Speed::Slow];
+
+    /// Multiplier for the duration of every animation.
+    pub fn factor(self) -> f32 {
+        match self {
+            Speed::Normal => 1.0 / 1.2,
+            Speed::Slow => 1.3,
+        }
+    }
+
+    /// Key of the speed's name in the locale files.
+    pub fn key(self) -> &'static str {
+        match self {
+            Speed::Normal => "speed-normal",
+            Speed::Slow => "speed-slow",
+        }
+    }
+}
+
+/// The speed in use, as an index into [`Speed::ALL`].
+static SPEED: AtomicU8 = AtomicU8::new(0);
+
+/// Switches the animation speed. Takes effect at once.
+pub fn set_speed(speed: Speed) {
+    let index = Speed::ALL.iter().position(|&s| s == speed).unwrap_or(0);
+    SPEED.store(u8::try_from(index).unwrap_or(0), Ordering::Relaxed);
+}
+
+/// The playback speed in use.
+pub fn speed() -> Speed {
+    let index = usize::from(SPEED.load(Ordering::Relaxed));
+    Speed::ALL.get(index).copied().unwrap_or_default()
+}
 
 /// Choices made on the menu screen.
 #[derive(Resource, Clone, Copy)]

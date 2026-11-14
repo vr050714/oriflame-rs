@@ -5,7 +5,10 @@
 
 use crate::{
     Screen,
-    game::{BotTurn, HUMAN, Mark, Role, Session, Settings, describe, player_name},
+    game::{
+        BotTurn, HUMAN, Mark, Role, Session, Settings, Speed, describe, player_name, set_speed,
+        speed,
+    },
     i18n::{self, Language, card_description, card_name},
     t,
 };
@@ -218,8 +221,10 @@ pub struct MotionClock(f32);
 
 /// Moves every node that has a [`Motion`].
 pub fn animate(time: Res<Time>, mut nodes: Query<(&Motion, &mut MotionClock, &mut UiTransform)>) {
+    // A slower speed stretches every animation; scene lengths stay the same.
+    let step = time.delta_secs() / speed().factor();
     for (motion, mut clock, mut transform) in &mut nodes {
-        clock.0 += time.delta_secs();
+        clock.0 += step;
         let t = clock.0;
         match motion {
             Motion::Pulse => transform.scale = Vec2::splat(1.0 + 0.08 * (t * 7.0).sin().abs()),
@@ -244,6 +249,10 @@ pub struct UiDirty(pub bool);
 /// True while the language list under the language button is open.
 #[derive(Resource, Default)]
 pub struct LanguageMenu(pub bool);
+
+/// True while the speed list under the speed button is open.
+#[derive(Resource, Default)]
+pub struct SpeedMenu(pub bool);
 
 /// Root node of the current screen.
 #[derive(Component)]
@@ -272,6 +281,9 @@ pub enum Click {
     /// Open or close the language list.
     LanguageMenu,
     Language(Language),
+    /// Open or close the playback speed list.
+    SpeedMenu,
+    Speed(Speed),
 }
 
 /// Handles every button press.
@@ -289,16 +301,20 @@ pub fn on_click(
     mut dirty: ResMut<UiDirty>,
     mut next: ResMut<NextState<Screen>>,
     mut language_menu: ResMut<LanguageMenu>,
+    mut speed_menu: ResMut<SpeedMenu>,
 ) {
     let Ok(&click) = clicks.get(event.entity) else {
         return;
     };
     dirty.0 = true;
-    // Any click closes the language list; its own button toggles it.
-    let menu_was_open = std::mem::take(&mut language_menu.0);
+    // Any click closes both lists; a list's own button toggles it.
+    let language_was_open = std::mem::take(&mut language_menu.0);
+    let speed_was_open = std::mem::take(&mut speed_menu.0);
     match click {
-        Click::LanguageMenu => language_menu.0 = !menu_was_open,
+        Click::LanguageMenu => language_menu.0 = !language_was_open,
         Click::Language(language) => i18n::set_language(language),
+        Click::SpeedMenu => speed_menu.0 = !speed_was_open,
+        Click::Speed(new_speed) => set_speed(new_speed),
         Click::Players(count) => settings.players = count,
         Click::Level(difficulty) => settings.difficulty = difficulty,
         Click::Start => match Session::new(*settings) {
@@ -356,6 +372,7 @@ pub fn rebuild_ui(
     session: Option<Res<Session>>,
     art: Res<CardArt>,
     language_menu: Res<LanguageMenu>,
+    speed_menu: Res<SpeedMenu>,
 ) {
     if !dirty.0 && !screen.is_changed() {
         return;
@@ -382,31 +399,87 @@ pub fn rebuild_ui(
         (Screen::GameOver, Some(session)) => game_over(ui, session),
         _ => menu(ui, &settings, &art),
     });
-    root.with_children(|ui| language_picker(ui, language_menu.0));
+    root.with_children(|ui| top_right_pickers(ui, language_menu.0, speed_menu.0));
 }
 
-/// The language drop-down in the top right corner: a button with the current
-/// language and, when open, the list of languages under it.
-fn language_picker(ui: &mut ChildSpawnerCommands, open: bool) {
-    let current = i18n::language();
+/// The drop-downs in the top right corner: playback speed, then language.
+fn top_right_pickers(ui: &mut ChildSpawnerCommands, language_open: bool, speed_open: bool) {
     ui.spawn((
         Node {
             position_type: PositionType::Absolute,
             top: px(12),
             right: px(12),
-            flex_direction: FlexDirection::Column,
-            align_items: AlignItems::Stretch,
-            row_gap: px(4),
+            flex_direction: FlexDirection::Row,
+            align_items: AlignItems::FlexStart,
+            column_gap: px(8),
             ..default()
         },
-        // Drawn over the screen, so the open list covers what is under it.
+        // Drawn over the screen, so an open list covers what is under it.
         GlobalZIndex(10),
     ))
+    .with_children(|ui| {
+        speed_picker(ui, speed_open);
+        language_picker(ui, language_open);
+    });
+}
+
+/// The speed drop-down: a button with the current speed and, when open, the
+/// list of speeds under it.
+fn speed_picker(ui: &mut ChildSpawnerCommands, open: bool) {
+    let current = speed();
+    dropdown(
+        ui,
+        &t!("speed-label", value = t!(current.key())),
+        Click::SpeedMenu,
+        open,
+        |ui| {
+            for option in Speed::ALL {
+                button(
+                    ui,
+                    &t!(option.key()),
+                    Click::Speed(option),
+                    option == current,
+                );
+            }
+        },
+    );
+}
+
+/// The language drop-down: a button with the current language and, when open,
+/// the list of languages under it.
+fn language_picker(ui: &mut ChildSpawnerCommands, open: bool) {
+    let current = i18n::language();
+    dropdown(ui, current.native_name(), Click::LanguageMenu, open, |ui| {
+        for language in Language::ALL {
+            button(
+                ui,
+                language.native_name(),
+                Click::Language(language),
+                language == current,
+            );
+        }
+    });
+}
+
+/// A button showing `label`; when `open`, `options` are listed under it.
+fn dropdown(
+    ui: &mut ChildSpawnerCommands,
+    label: &str,
+    toggle: Click,
+    open: bool,
+    options: impl FnOnce(&mut ChildSpawnerCommands),
+) {
+    ui.spawn(Node {
+        flex_direction: FlexDirection::Column,
+        align_items: AlignItems::Stretch,
+        row_gap: px(4),
+        ..default()
+    })
     .with_children(|ui| {
         ui.spawn((
             Button,
             Hovered::default(),
-            Click::LanguageMenu,
+            toggle,
             RestBorder(INK),
             Node {
                 padding: UiRect::axes(px(14), px(7)),
@@ -421,18 +494,11 @@ fn language_picker(ui: &mut ChildSpawnerCommands, open: bool) {
             BorderColor::all(INK),
         ))
         .with_children(|ui| {
-            ui.spawn(text(current.native_name(), 18.0, PAPER));
+            ui.spawn(text(label, 18.0, PAPER));
             caret(ui, open);
         });
         if open {
-            for language in Language::ALL {
-                button(
-                    ui,
-                    language.native_name(),
-                    Click::Language(language),
-                    language == current,
-                );
-            }
+            options(ui);
         }
     });
 }
