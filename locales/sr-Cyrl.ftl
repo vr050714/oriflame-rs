@@ -9,8 +9,8 @@ strength = Снага рачунара
 level-easy = Лако
 level-medium = Средње
 level-hard = Тешко
-speed-normal = Брза
-speed-slow = Спора
+speed-normal = Брзо
+speed-slow = Полако
 start-game = Почни игру
 
 ## Players
