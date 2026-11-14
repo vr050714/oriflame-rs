@@ -429,7 +429,7 @@ fn speed_picker(ui: &mut ChildSpawnerCommands, open: bool) {
     let current = speed();
     dropdown(
         ui,
-        &t!("speed-label", value = t!(current.key())),
+        &t!(current.key()),
         Click::SpeedMenu,
         open,
         |ui| {
@@ -927,6 +927,19 @@ fn board(ui: &mut ChildSpawnerCommands, session: &Session, art: &CardArt) {
             26.0,
             GOLD,
         ));
+    });
+
+    // The menu button sits in the top left corner.
+    ui.spawn((
+        Node {
+            position_type: PositionType::Absolute,
+            top: px(12),
+            left: px(12),
+            ..default()
+        },
+        GlobalZIndex(10),
+    ))
+    .with_children(|ui| {
         button(ui, &t!("menu"), Click::Menu, false);
     });
 
