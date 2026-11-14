@@ -9,9 +9,8 @@ strength = Сила компьютера
 level-easy = Лёгкий
 level-medium = Средний
 level-hard = Сложный
-speed-label = Скорость: { $value }
-speed-normal = Обычная
-speed-slow = Медленная
+speed-normal = Быстро
+speed-slow = Медленно
 start-game = Начать игру
 
 ## Players

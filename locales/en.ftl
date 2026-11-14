@@ -11,8 +11,7 @@ level-easy = Easy
 level-medium = Medium
 level-hard = Hard
 start-game = Start game
-speed-label = Speed: { $value }
-speed-normal = Normal
+speed-normal = Fast
 speed-slow = Slow
 
 ## Players
