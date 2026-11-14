@@ -221,8 +221,10 @@ pub struct MotionClock(f32);
 
 /// Moves every node that has a [`Motion`].
 pub fn animate(time: Res<Time>, mut nodes: Query<(&Motion, &mut MotionClock, &mut UiTransform)>) {
+    // A slower speed stretches every animation by the same factor as the scenes.
+    let step = time.delta_secs() / speed().factor();
     for (motion, mut clock, mut transform) in &mut nodes {
-        clock.0 += time.delta_secs();
+        clock.0 += step;
         let t = clock.0;
         match motion {
             Motion::Pulse => transform.scale = Vec2::splat(1.0 + 0.08 * (t * 7.0).sin().abs()),
