@@ -32,9 +32,10 @@ const BOT_DELAY: f32 = 0.5;
 /// before a computer player moves do not depend on it.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum Speed {
+    /// Animations run 10 percent faster than they used to.
     #[default]
     Normal,
-    /// Animations take 20 percent longer, for new players.
+    /// Animations take 30 percent longer than they used to, for new players.
     Slow,
 }
 
@@ -45,8 +46,8 @@ impl Speed {
     /// Multiplier for the duration of every animation.
     pub fn factor(self) -> f32 {
         match self {
-            Speed::Normal => 1.0,
-            Speed::Slow => 1.2,
+            Speed::Normal => 1.0 / 1.1,
+            Speed::Slow => 1.3,
         }
     }
 
