@@ -16,7 +16,11 @@ use oriflamme_core::{
     Action, CardKind, Event, GameState, MIN_PLAYERS, PlayerId, Rng64, RuleError, SetupError, Slot,
     Snapshot, Stack, Step,
 };
-use std::collections::VecDeque;
+use std::{
+    collections::VecDeque,
+    sync::atomic::{AtomicU8, Ordering},
+    time::Duration,
+};
 use web_time::{SystemTime, UNIX_EPOCH};
 
 /// The human always sits in seat 0.
@@ -24,6 +28,52 @@ pub const HUMAN: PlayerId = 0;
 
 /// Seconds a computer player waits before it starts to think.
 const BOT_DELAY: f32 = 0.5;
+
+/// How fast the playback of events runs. It scales every pause: the length of
+/// each scene and the wait before a computer player moves.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum Speed {
+    #[default]
+    Normal,
+    /// 30 percent longer pauses, for new players.
+    Slow,
+}
+
+impl Speed {
+    /// Every speed, in the order of the speed menu.
+    pub const ALL: [Speed; 2] = [Speed::Normal, Speed::Slow];
+
+    /// Multiplier for every duration.
+    pub fn factor(self) -> f32 {
+        match self {
+            Speed::Normal => 1.0,
+            Speed::Slow => 1.3,
+        }
+    }
+
+    /// Key of the speed's name in the locale files.
+    pub fn key(self) -> &'static str {
+        match self {
+            Speed::Normal => "speed-normal",
+            Speed::Slow => "speed-slow",
+        }
+    }
+}
+
+/// The speed in use, as an index into [`Speed::ALL`].
+static SPEED: AtomicU8 = AtomicU8::new(0);
+
+/// Switches the playback speed. Takes effect from the next scene.
+pub fn set_speed(speed: Speed) {
+    let index = Speed::ALL.iter().position(|&s| s == speed).unwrap_or(0);
+    SPEED.store(u8::try_from(index).unwrap_or(0), Ordering::Relaxed);
+}
+
+/// The playback speed in use.
+pub fn speed() -> Speed {
+    let index = usize::from(SPEED.load(Ordering::Relaxed));
+    Speed::ALL.get(index).copied().unwrap_or_default()
+}
 
 /// Choices made on the menu screen.
 #[derive(Resource, Clone, Copy)]
@@ -211,7 +261,8 @@ impl Session {
             if self.log.last() != Some(&line) {
                 self.log.push(line);
             }
-            self.scene_timer = Timer::from_seconds(scene.seconds, TimerMode::Once);
+            self.scene_timer =
+                Timer::from_seconds(scene.seconds * speed().factor(), TimerMode::Once);
         }
     }
 }
@@ -463,6 +514,8 @@ impl BotTurn {
     /// Drops any move being computed and restarts the delay.
     pub fn reset(&mut self) {
         self.task = None;
+        self.timer
+            .set_duration(Duration::from_secs_f32(BOT_DELAY * speed().factor()));
         self.timer.reset();
     }
 }

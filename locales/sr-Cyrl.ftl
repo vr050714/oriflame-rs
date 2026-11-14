@@ -9,6 +9,9 @@ strength = Снага рачунара
 level-easy = Лако
 level-medium = Средње
 level-hard = Тешко
+speed-label = Брзина: { $value }
+speed-normal = Нормална
+speed-slow = Спора
 start-game = Почни игру
 
 ## Players
