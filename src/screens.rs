@@ -427,22 +427,16 @@ fn top_right_pickers(ui: &mut ChildSpawnerCommands, language_open: bool, speed_o
 /// list of speeds under it.
 fn speed_picker(ui: &mut ChildSpawnerCommands, open: bool) {
     let current = speed();
-    dropdown(
-        ui,
-        &t!(current.key()),
-        Click::SpeedMenu,
-        open,
-        |ui| {
-            for option in Speed::ALL {
-                button(
-                    ui,
-                    &t!(option.key()),
-                    Click::Speed(option),
-                    option == current,
-                );
-            }
-        },
-    );
+    dropdown(ui, &t!(current.key()), Click::SpeedMenu, open, |ui| {
+        for option in Speed::ALL {
+            button(
+                ui,
+                &t!(option.key()),
+                Click::Speed(option),
+                option == current,
+            );
+        }
+    });
 }
 
 /// The language drop-down: a button with the current language and, when open,
