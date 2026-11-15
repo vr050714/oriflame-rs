@@ -1,7 +1,8 @@
 //! Rasterises the art sources to the files the game uses:
 //!
-//! - every `art/cards/*.svg` and `art/ui/*.svg` to a PNG of the same name
-//!   in `assets/cards` and `assets/ui`;
+//! - every `art/cards/*.svg`, `art/mini/*.svg` (the card miniatures of the
+//!   game log) and `art/ui/*.svg` to a PNG of the same name in
+//!   `assets/cards`, `assets/mini` and `assets/ui`;
 //! - `art/icon.svg` to `assets/icon.png` (window icon) and `assets/icon.ico`
 //!   (executable icon).
 //!
@@ -22,7 +23,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     let assets = root.join("assets");
 
     let mut count: u32 = 0;
-    for folder in ["cards", "ui"] {
+    for folder in ["cards", "mini", "ui"] {
         let target = assets.join(folder);
         fs::create_dir_all(&target)?;
         for entry in fs::read_dir(art.join(folder))? {

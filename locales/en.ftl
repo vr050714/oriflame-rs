@@ -72,22 +72,80 @@ decree-pick-card = Royal Decree: pick the card to move.
 decree-pick-place = Royal Decree: pick the new place for the card.
 pick-target = { $card }: pick a highlighted card.
 
-## Game log. Each line describes one event.
+## Story of the game. Each event is told as a sentence; the sentences about
+## one card's turn make a paragraph. { $card } (the card that acts) and
+## { $target } (the card acted upon) are drawn as a miniature and the card's
+## name, or as log-hidden-card, so keep them in a form that needs no
+## grammatical case. $player_you, $owner_you and $victim_you are "yes" when
+## that player is the human. $lead is "yes" when the sentence opens its
+## paragraph and "no" when it goes on about the same card.
 
-log-round = Round { $round } begins.
-log-placed-left = { $player } placed a card at the start of the queue.
-log-placed-right = { $player } placed a card at the end of the queue.
-log-placed-stack = { $player } placed a card on top of an own card.
-log-kept-hidden = { $player } kept a card hidden ({ $influence } influence on it).
-log-revealed = { $player } revealed { $card } and took { $gained } influence.
-log-gained = { $player } gained { $amount } influence.
-log-stole = { $thief } stole 1 influence from { $victim }.
-log-copied = { $player }: Shapeshifter copies { $card }.
-log-eliminated = { $player }: { $card } eliminated { $target } of { $owner } (+1).
-log-ambushed = { $player }: { $card } hit an Ambush of { $owner } (+{ $gained } for the Ambush).
-log-discarded = { $player } discarded { $card }.
-log-moved = { $player } moved a card of { $owner } to position { $position }.
+story-actor = { $lead ->
+    [yes] { $player_you ->
+        [yes] Your
+       *[other] { $player }'s
+    } { $card }
+   *[other] It
+}
+story-amount = { $amount } influence
+story-round = Round { $round } begins.
+story-placed-left = { $player } laid { $card } at the head of the queue.
+story-placed-right = { $player } laid { $card } at the end of the queue.
+story-placed-stack = { $player } laid { $card } on top of { $target }.
+story-kept-hidden = { $player } kept { $card } hidden, and the stake on it grew to { $amount }.
+story-revealed = { $player } turned over { $card }.
+story-revealed-gain = { $player } turned over { $card } and collected { story-amount }.
+story-gained = { story-actor } earned { story-amount }.
+story-stole = { story-actor } reached past { $target } and stole 1 influence from { $victim_you ->
+    [yes] you
+   *[other] { $victim }
+}.
+story-copied = { story-actor } took on the guise of { $owner_you ->
+    [yes] your
+   *[other] { $owner }'s
+} { $target }.
+story-eliminated = { story-actor } struck down { $owner_you ->
+    [yes] your
+   *[other] { $owner }'s
+} { $target }, and { $player_you ->
+    [yes] you
+   *[other] { $player }
+} gained 1 influence.
+story-eliminated-self = { story-actor } struck itself down, and { $player_you ->
+    [yes] you
+   *[other] { $player }
+} gained 1 influence.
+story-ambushed = { story-actor } attacked { $owner_you ->
+    [yes] your
+   *[other] { $owner }'s
+} { $target } and fell into the trap: { $owner_you ->
+    [yes] you
+   *[other] { $owner }
+} gained { story-amount }, { $player_you ->
+    [yes] you
+   *[other] { $player }
+} gained 1.
+story-ambushed-own = { story-actor } sprang { $player_you ->
+    [yes] your
+   *[other] { $player }'s
+} own { $target }, which brought { story-amount }.
+story-discarded = { story-actor } was then discarded.
+story-moved = { story-actor } moved { $target } to position { $position } in the queue.
+story-tally-final = When the round ended:
+story-tally-now = So far:
+story-tally-item = { $player }: { $total } ({ $change })
+
+## Game log on the board and in the log window.
+
 log-error = Error: { $error }
+log-hidden-card = a face-down card
+log-change = { $player } { $amount }
+log-empty = Nothing has happened in this round yet.
+log-open = Log
+log-title = The story so far
+log-round-tab = Round { $round }
+log-close = Close
+log-paused = The game waits while the story is open.
 
 ## Labels on cards while an action is shown
 

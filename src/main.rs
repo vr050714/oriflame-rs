@@ -62,6 +62,7 @@ fn main() -> AppExit {
             screens::rebuild_ui,
             screens::hover_style,
             screens::animate,
+            screens::scroll_log,
         ),
     )
     .add_observer(screens::on_click);

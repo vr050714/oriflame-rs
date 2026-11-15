@@ -74,22 +74,95 @@ decree-pick-card = Краљевски указ: изаберите карту к
 decree-pick-place = Краљевски указ: изаберите ново место за карту.
 pick-target = { $card }: изаберите истакнуту карту.
 
-## Game log. Each line describes one event.
+## Story of the game. Card names stay in the nominative: "карту { $card }".
 
-log-round = Почиње рунда { $round }.
-log-placed-left = { $player }: карта је стављена на почетак реда.
-log-placed-right = { $player }: карта је стављена на крај реда.
-log-placed-stack = { $player }: карта је стављена преко сопствене карте.
-log-kept-hidden = { $player }: карта остаје скривена (утицај на њој: { $influence }).
-log-revealed = { $player }: откривена је карта „{ $card }“, добијено утицаја: { $gained }.
-log-gained = { $player }: добијено утицаја: { $amount }.
-log-stole = { $thief }: украден 1 поен утицаја (од: { $victim }).
-log-copied = { $player }: Мењач облика копира карту „{ $card }“.
-log-eliminated = { $player }: „{ $card }“ елиминише „{ $target }“ ({ $owner }) (+1).
-log-ambushed = { $player }: „{ $card }“ упада у Заседу ({ $owner }) (+{ $gained } за Заседу).
-log-discarded = { $player }: одбачена је карта „{ $card }“.
-log-moved = { $player }: карта ({ $owner }) премештена је на позицију { $position }.
+story-actor = { $lead ->
+    [yes] { $player_you ->
+        [yes] Ваша карта { $card }
+       *[other] Карта { $card } играча { $player }
+    }
+   *[other] Она
+}
+story-amount = { $amount } { $amount ->
+    [one] поен
+   *[other] поена
+} утицаја
+story-round = Почиње рунда { $round }.
+story-placed-left = { $player_you ->
+    [yes] Ви стављате
+   *[other] { $player } ставља
+} карту { $card } на почетак реда.
+story-placed-right = { $player_you ->
+    [yes] Ви стављате
+   *[other] { $player } ставља
+} карту { $card } на крај реда.
+story-placed-stack = { $player_you ->
+    [yes] Ви стављате
+   *[other] { $player } ставља
+} карту { $card } преко карте { $target }.
+story-kept-hidden = { $player_you ->
+    [yes] Ви не откривате
+   *[other] { $player } не открива
+} карту { $card }, и улог на њој расте на { $amount }.
+story-revealed = { $player_you ->
+    [yes] Ви откривате
+   *[other] { $player } открива
+} карту { $card }.
+story-revealed-gain = { $player_you ->
+    [yes] Ви откривате карту { $card } и узимате
+   *[other] { $player } открива карту { $card } и узима
+} { story-amount }.
+story-gained = { story-actor } доноси { story-amount }.
+story-stole = { story-actor } посеже поред карте { $target } и краде 1 поен утицаја од { $victim_you ->
+    [yes] вас
+   *[other] { $victim }
+}.
+story-copied = { story-actor } преузима облик { $owner_you ->
+    [yes] ваше карте { $target }
+   *[other] карте { $target } играча { $owner }
+}.
+story-eliminated = { story-actor } елиминише { $owner_you ->
+    [yes] вашу карту { $target }
+   *[other] карту { $target } играча { $owner }
+}, а { $player_you ->
+    [yes] ви добијате
+   *[other] { $player } добија
+} 1 поен утицаја.
+story-eliminated-self = { story-actor } елиминише саму себе, а { $player_you ->
+    [yes] ви добијате
+   *[other] { $player } добија
+} 1 поен утицаја.
+story-ambushed = { story-actor } напада { $owner_you ->
+    [yes] вашу карту { $target }
+   *[other] карту { $target } играча { $owner }
+} и упада у замку: { $owner_you ->
+    [yes] ви добијате
+   *[other] { $owner } добија
+} { story-amount }, а { $player_you ->
+    [yes] ви
+   *[other] { $player }
+} 1 поен.
+story-ambushed-own = { story-actor } упада у { $player_you ->
+    [yes] вашу сопствену
+   *[other] сопствену
+} карту { $target }, и то доноси { story-amount }.
+story-discarded = { story-actor } одлази међу одбачене карте.
+story-moved = { story-actor } премешта карту { $target } на { $position }. место у реду.
+story-tally-final = На крају рунде:
+story-tally-now = За сада:
+story-tally-item = { $player }: { $total } ({ $change })
+
+## Game log on the board and in the log window.
+
 log-error = Грешка: { $error }
+log-hidden-card = лицем надоле
+log-change = { $player } { $amount }
+log-empty = У овој рунди се још ништа није догодило.
+log-open = Дневник
+log-title = Прича партије
+log-round-tab = Рунда { $round }
+log-close = Затвори
+log-paused = Док је прича отворена, игра чека.
 
 ## Labels on cards while an action is shown
 
