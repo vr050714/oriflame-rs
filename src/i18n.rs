@@ -188,6 +188,40 @@ mod tests {
         }
     }
 
+    /// Every message formats without errors in every language when given
+    /// the arguments the game passes, with each answer of the yes-or-no
+    /// selectors. Catches misspelt variables and message references.
+    #[test]
+    fn messages_format_without_errors() {
+        for language in Language::ALL {
+            let (_, bundle) = BUNDLES.iter().find(|(l, _)| *l == language).unwrap();
+            for key in keys(language) {
+                for answer in ["yes", "no"] {
+                    let mut args = FluentArgs::new();
+                    let names = ["player", "victim", "owner", "card", "target"];
+                    for name in names.into_iter().chain(["copied", "names", "error"]) {
+                        args.set(name, "X");
+                    }
+                    for name in ["player_you", "owner_you", "victim_you", "lead"] {
+                        args.set(name, answer);
+                    }
+                    let numbers = ["amount", "round", "rounds", "count", "pcs", "number"];
+                    for name in numbers
+                        .into_iter()
+                        .chain(["position", "total", "change", "gained"])
+                    {
+                        args.set(name, 2);
+                    }
+                    let pattern = bundle.get_message(key).unwrap().value().unwrap();
+                    let mut errors = Vec::new();
+                    let text = bundle.format_pattern(pattern, Some(&args), &mut errors);
+                    assert!(errors.is_empty(), "{key} in {}: {errors:?}", language.tag());
+                    assert!(!text.contains('{'), "{key} in {}: {text}", language.tag());
+                }
+            }
+        }
+    }
+
     #[test]
     fn formats_arguments() {
         let text = translate("round-of", &[("round", 2.into()), ("rounds", 6.into())]);

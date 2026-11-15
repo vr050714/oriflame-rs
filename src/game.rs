@@ -230,6 +230,8 @@ pub struct Entry {
     /// Influence won (positive) or lost by each player whose influence
     /// changed, in seat order.
     pub changes: Vec<(PlayerId, i64)>,
+    /// Every player's influence after the event.
+    pub after: Vec<u32>,
 }
 
 /// The top card at `pos`, as the human sees it.
@@ -313,26 +315,31 @@ impl Entry {
             actor,
             target,
             changes,
+            after: after.influence.clone(),
         }
     }
 
-    /// The event as a sentence in the current language, cut into text and
-    /// the cards it mentions.
-    pub fn story(&self) -> Vec<Piece> {
+    /// The event as a sentence of the story in the current language, cut
+    /// into text and the cards it mentions. A `lead` sentence opens a
+    /// paragraph and names the acting card and its owner; the others go on
+    /// telling about the same card.
+    pub fn story(&self, lead: bool) -> Vec<Piece> {
         let card = || ACTOR_MARK.to_string();
         let target = || TARGET_MARK.to_string();
-        let owner = |seen: Option<Seen>| seen.map_or_else(String::new, |s| player_name(s.owner));
+        let lead = yes_no(lead);
+        let target_owner = self.target.map_or(HUMAN, |seen| seen.owner);
         let sentence = match self.event {
-            Event::RoundStarted(round) => t!("log-round", round = round),
+            Event::RoundStarted(round) => t!("story-round", round = round),
             Event::Placed { player, slot } => {
                 let key = match slot {
-                    Slot::Left => "log-placed-left",
-                    Slot::Right => "log-placed-right",
-                    Slot::OnStack(_) => "log-placed-stack",
+                    Slot::Left => "story-placed-left",
+                    Slot::Right => "story-placed-right",
+                    Slot::OnStack(_) => "story-placed-stack",
                 };
                 t!(
                     key,
                     player = player_name(player),
+                    player_you = you(player),
                     card = card(),
                     target = target()
                 )
@@ -340,83 +347,126 @@ impl Entry {
             Event::KeptHidden {
                 player, influence, ..
             } => t!(
-                "log-kept-hidden",
+                "story-kept-hidden",
                 player = player_name(player),
+                player_you = you(player),
                 card = card(),
-                influence = influence
+                amount = influence
             ),
-            Event::Revealed { card: revealed, .. } => t!(
-                "log-revealed",
+            Event::Revealed {
+                card: revealed,
+                gained,
+                ..
+            } => t!(
+                if gained > 0 {
+                    "story-revealed-gain"
+                } else {
+                    "story-revealed"
+                },
                 player = player_name(revealed.owner),
-                card = card()
+                player_you = you(revealed.owner),
+                card = card(),
+                amount = gained
             ),
             Event::Gained { player, amount, .. } => t!(
-                "log-gained",
+                "story-gained",
+                lead = lead,
                 player = player_name(player),
+                player_you = you(player),
                 card = card(),
                 amount = amount
             ),
             Event::Stole { thief, victim, .. } => t!(
-                "log-stole",
+                "story-stole",
+                lead = lead,
                 player = player_name(thief),
+                player_you = you(thief),
                 card = card(),
+                target = target(),
                 victim = player_name(victim),
-                target = target()
+                victim_you = you(victim)
             ),
             Event::Copied { player, .. } => t!(
-                "log-copied",
+                "story-copied",
+                lead = lead,
                 player = player_name(player),
+                player_you = you(player),
                 card = card(),
                 target = target(),
-                owner = owner(self.target)
-            ),
-            Event::Eliminated {
-                by, target: hit, ..
-            } if by == hit => t!(
-                "log-eliminated-self",
-                player = player_name(by.owner),
-                card = card()
+                owner = player_name(target_owner),
+                owner_you = you(target_owner)
             ),
             Event::Eliminated {
                 by, target: hit, ..
             } => t!(
-                "log-eliminated",
+                if by == hit {
+                    "story-eliminated-self"
+                } else {
+                    "story-eliminated"
+                },
+                lead = lead,
                 player = player_name(by.owner),
+                player_you = you(by.owner),
                 card = card(),
                 target = target(),
-                owner = player_name(hit.owner)
+                owner = player_name(hit.owner),
+                owner_you = you(hit.owner)
             ),
             Event::Ambushed {
-                attacker, owner, ..
-            } => t!(
-                "log-ambushed",
-                player = player_name(attacker.owner),
-                card = card(),
-                target = target(),
-                owner = player_name(owner)
-            ),
+                attacker,
+                owner,
+                gained,
+                ..
+            } => {
+                // The attacker's owner gains 1 as well.
+                let (key, amount) = if owner == attacker.owner {
+                    ("story-ambushed-own", gained.saturating_add(1))
+                } else {
+                    ("story-ambushed", gained)
+                };
+                t!(
+                    key,
+                    lead = lead,
+                    player = player_name(attacker.owner),
+                    player_you = you(attacker.owner),
+                    card = card(),
+                    target = target(),
+                    owner = player_name(owner),
+                    owner_you = you(owner),
+                    amount = amount
+                )
+            }
             Event::Discarded { card: gone, .. } => t!(
-                "log-discarded",
+                "story-discarded",
+                lead = lead,
                 player = player_name(gone.owner),
+                player_you = you(gone.owner),
                 card = card()
             ),
-            Event::Moved {
-                player,
-                moved_owner,
-                to,
-                ..
-            } => t!(
-                "log-moved",
+            Event::Moved { player, to, .. } => t!(
+                "story-moved",
+                lead = lead,
                 player = player_name(player),
+                player_you = you(player),
                 card = card(),
                 target = target(),
-                owner = player_name(moved_owner),
                 position = to.saturating_add(1)
             ),
             Event::GameOver => t!("game-is-over"),
         };
         split_story(&sentence, self.actor, self.target)
     }
+}
+
+/// A yes-or-no argument for a Fluent selector.
+fn yes_no(value: bool) -> &'static str {
+    if value { "yes" } else { "no" }
+}
+
+/// Whether `player` is the human, for the messages that address the human
+/// differently.
+fn you(player: PlayerId) -> &'static str {
+    yes_no(player == HUMAN)
 }
 
 /// Cuts a sentence at the card marks. Punctuation that touches a mark
@@ -477,12 +527,69 @@ pub struct RoundLog {
     pub lines: Vec<LogLine>,
 }
 
+/// What a paragraph of the story is about.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Topic {
+    /// The cards put down at the start of the round.
+    Placement,
+    /// One card's turn in the resolution.
+    Turn(Option<Seen>),
+}
+
+/// A sentence of the story: a log line, and whether it opens its paragraph.
+pub struct Sentence<'a> {
+    pub line: &'a LogLine,
+    pub lead: bool,
+}
+
 impl RoundLog {
     fn new(round: u8) -> Self {
         Self {
             round,
             lines: Vec::new(),
         }
+    }
+
+    /// The story of the round in paragraphs: first the cards put down, then
+    /// one paragraph for every card that takes its turn.
+    pub fn paragraphs(&self) -> Vec<Vec<Sentence<'_>>> {
+        let mut paragraphs: Vec<Vec<Sentence>> = Vec::new();
+        let mut topic = None;
+        for line in &self.lines {
+            let (this, opens) = match line {
+                LogLine::Error(_) => (topic, paragraphs.is_empty()),
+                LogLine::Entry(entry) => match entry.event {
+                    Event::Placed { .. } => {
+                        (Some(Topic::Placement), topic != Some(Topic::Placement))
+                    }
+                    // A card's turn starts when it is revealed or kept hidden.
+                    Event::KeptHidden { .. } | Event::Revealed { .. } => {
+                        (Some(Topic::Turn(entry.actor)), true)
+                    }
+                    _ => {
+                        let this = Some(Topic::Turn(entry.actor));
+                        (this, topic != this)
+                    }
+                },
+            };
+            topic = this;
+            if opens {
+                paragraphs.push(Vec::new());
+            }
+            if let Some(paragraph) = paragraphs.last_mut() {
+                paragraph.push(Sentence { line, lead: opens });
+            }
+        }
+        paragraphs
+    }
+
+    /// Every player's influence after the last event of the round, if
+    /// anything has happened yet.
+    pub fn standing(&self) -> Option<&[u32]> {
+        self.lines.iter().rev().find_map(|line| match line {
+            LogLine::Entry(entry) => Some(entry.after.as_slice()),
+            LogLine::Error(_) => None,
+        })
     }
 
     /// Influence each of `players` players won or lost in the round.
@@ -903,7 +1010,7 @@ mod tests {
         let (_, steps) = random_game(7, 5);
         for step in &steps {
             let entry = Entry::from_step(step);
-            for piece in entry.story() {
+            for piece in entry.story(true) {
                 match piece {
                     Piece::Text(text) => {
                         assert!(!text.is_empty());
@@ -916,6 +1023,42 @@ mod tests {
                     }
                 }
             }
+        }
+    }
+
+    /// Every round's story tells each line once, in order: the placements
+    /// open the round, and each paragraph starts with a lead sentence.
+    #[test]
+    fn paragraphs_tell_every_line_once() {
+        let mut rng = Rng64::new(3);
+        let mut state = GameState::new(4, &mut rng).unwrap();
+        let mut log = vec![RoundLog::new(1)];
+        while state.current_player().is_some() {
+            let legal = state.legal_actions();
+            let action = legal[rng.below(legal.len())];
+            for step in state.apply_traced(action).unwrap() {
+                let entry = Entry::from_step(&step);
+                match entry.event {
+                    Event::RoundStarted(round) => log.push(RoundLog::new(round)),
+                    Event::GameOver => {}
+                    _ => log.last_mut().unwrap().lines.push(LogLine::Entry(entry)),
+                }
+            }
+        }
+        assert_eq!(log.len(), 6);
+        for story in &log {
+            let paragraphs = story.paragraphs();
+            let told: Vec<&LogLine> = paragraphs.iter().flatten().map(|s| s.line).collect();
+            assert_eq!(told, story.lines.iter().collect::<Vec<_>>());
+            assert!(paragraphs.iter().all(|p| p[0].lead));
+            assert!(paragraphs[0].iter().all(|s| matches!(
+                s.line,
+                LogLine::Entry(Entry {
+                    event: Event::Placed { .. },
+                    ..
+                })
+            )));
+            assert!(paragraphs.len() > 1);
         }
     }
 

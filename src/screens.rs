@@ -6,8 +6,8 @@
 use crate::{
     Screen,
     game::{
-        BotTurn, Entry, HUMAN, LogLine, Mark, Piece, Role, RoundLog, Seen, Session, Settings,
-        Speed, player_name, set_speed, speed,
+        BotTurn, Entry, HUMAN, LogLine, Mark, Piece, Role, RoundLog, Seen, Sentence, Session,
+        Settings, Speed, player_name, set_speed, speed,
     },
     i18n::{self, Language, card_description, card_name},
     t,
@@ -37,6 +37,12 @@ const HIDDEN_TINT: Color = Color::srgb(0.62, 0.62, 0.70);
 const RED: Color = Color::srgb(0.88, 0.22, 0.18);
 /// Text colour of an influence loss; `RED` is too dark to read on the panels.
 const LOSS: Color = Color::srgb(1.0, 0.52, 0.46);
+/// The parchment of the story and its inks. The serif strokes are thin, so
+/// the inks are darker than the interface colours.
+const PAGE: Color = PAPER;
+const PAGE_INK: Color = Color::srgb(0.08, 0.05, 0.05);
+const CRIMSON: Color = Color::srgb(0.50, 0.08, 0.05);
+const PAGE_DIM: Color = Color::srgb(0.34, 0.26, 0.20);
 
 /// Size of the arrow that points at the card being resolved.
 const ARROW_W: f32 = 26.0;
@@ -53,14 +59,14 @@ const ART_H: f32 = 118.0;
 /// Size of the panel under the hand that explains a card.
 const INFO_W: f32 = 640.0;
 const INFO_H: f32 = 96.0;
-/// Lines of the game log shown on the board, round titles included.
-const LOG_LINES: usize = 4;
-/// Width of the log panel on the board and of the log window.
+/// Size of the strip of the story on the board, and width of the page in the
+/// log window.
 const LOG_W: f32 = 820.0;
-const LOG_WINDOW_W: f32 = 900.0;
-/// Text size of the log on the board and in the log window.
-const LOG_TEXT: f32 = 15.0;
-const LOG_WINDOW_TEXT: f32 = 18.0;
+const LOG_PANEL_H: f32 = 136.0;
+const LOG_WINDOW_W: f32 = 860.0;
+/// Text size of the story on the board and in the log window.
+const LOG_TEXT: f32 = 17.0;
+const LOG_WINDOW_TEXT: f32 = 20.0;
 
 /// Design size of the screens, in UI pixels, at scale 1. The board is about
 /// this tall with one row of cards; each further row of the queue adds
@@ -140,9 +146,9 @@ fn family_color(player: PlayerId) -> Color {
     }
 }
 
-/// Card images, decoded once and kept for the whole run.
+/// Card images and the story font, decoded once and kept for the whole run.
 ///
-/// The PNG files are compiled into the executable, so the game runs from any
+/// The files are compiled into the executable, so the game runs from any
 /// folder without an `assets` directory beside it.
 #[derive(Resource)]
 pub struct CardArt {
@@ -156,6 +162,8 @@ pub struct CardArt {
     minis: Vec<(CardKind, Handle<Image>)>,
     /// Miniature of a face-down card.
     mini_back: Handle<Image>,
+    /// Book font of the story in the log: PT Serif, with Cyrillic.
+    story_font: Handle<Font>,
 }
 
 /// The PNG bytes of a card miniature.
@@ -192,6 +200,10 @@ fn face_png(kind: CardKind) -> &'static [u8] {
 
 impl FromWorld for CardArt {
     fn from_world(world: &mut World) -> Self {
+        // PT Serif, unmodified; its licence is assets/fonts/PTSerif-LICENSE.txt.
+        let story_font = world.resource_mut::<Assets<Font>>().add(Font::from_bytes(
+            include_bytes!("../assets/fonts/PTSerif-Regular.ttf").to_vec(),
+        ));
         let mut images = world.resource_mut::<Assets<Image>>();
         let mut decode = |name: &str, png: &[u8]| {
             let image = Image::from_buffer(
@@ -223,6 +235,7 @@ impl FromWorld for CardArt {
                 .map(|kind| (kind, decode(kind.slug(), mini_png(kind))))
                 .collect(),
             mini_back: decode("mini back", include_bytes!("../assets/mini/back.png")),
+            story_font,
         }
     }
 }
@@ -1056,7 +1069,7 @@ fn board(ui: &mut ChildSpawnerCommands, session: &Session, art: &CardArt) {
 
     // The headline: the event being shown, or what to do now.
     match scene {
-        Some(scene) => story_line(ui, art, &scene.entry, 22.0, PAPER, JustifyContent::Center),
+        Some(scene) => story_line(ui, art, &scene.entry),
         None => {
             ui.spawn(text(prompt(session), 22.0, PAPER));
         }
@@ -1215,60 +1228,78 @@ fn board(ui: &mut ChildSpawnerCommands, session: &Session, art: &CardArt) {
     }
 }
 
-/// A line of the log panel on the board.
-enum Recent<'a> {
-    Round(u8),
-    Line(&'a LogLine),
-}
-
-/// The last events of the game, newest last, with the titles of the rounds
-/// they belong to. A click opens the log window.
+/// The latest part of the story, on a strip of parchment: the last
+/// paragraphs of the latest round that has one. A click opens the whole
+/// story.
 fn recent_story(ui: &mut ChildSpawnerCommands, session: &Session, art: &CardArt) {
-    let recent: Vec<Recent> = session
+    let story = session
         .log
         .iter()
-        .flat_map(|story| {
-            std::iter::once(Recent::Round(story.round)).chain(story.lines.iter().map(Recent::Line))
-        })
-        .collect();
-    let start = recent.len().saturating_sub(LOG_LINES);
+        .rev()
+        .find(|story| !story.lines.is_empty());
+    let ink = Ink {
+        size: LOG_TEXT,
+        text: PAGE_INK,
+        name: CRIMSON,
+        font: Some(&art.story_font),
+    };
     ui.spawn((
         Button,
         Hovered::default(),
         Click::Log,
-        RestBorder(PANEL),
+        RestBorder(INK),
         Node {
             width: px(LOG_W),
             max_width: percent(100),
-            min_height: px(LOG_LINES as f32 * (LOG_TEXT + 14.0) + 16.0),
-            padding: UiRect::axes(px(14), px(8)),
-            border: UiRect::all(px(2)),
+            height: px(LOG_PANEL_H),
+            padding: UiRect::axes(px(18), px(8)),
+            border: UiRect::all(px(3)),
             border_radius: BorderRadius::all(px(10)),
             flex_direction: FlexDirection::Column,
             row_gap: px(4),
             ..default()
         },
-        BackgroundColor(PANEL),
-        BorderColor::all(PANEL),
+        BackgroundColor(PAGE),
+        BorderColor::all(INK),
     ))
     .with_children(|ui| {
-        for item in recent.iter().skip(start) {
-            match item {
-                Recent::Round(round) => {
-                    ui.spawn(text(t!("log-round-tab", round = *round), LOG_TEXT, GOLD));
-                }
-                Recent::Line(line) => log_line(ui, art, line, LOG_TEXT, DIM),
+        let Some(story) = story else {
+            return;
+        };
+        ui.spawn(ink.words(
+            t!("log-round-tab", round = story.round),
+            CRIMSON,
+            LOG_TEXT + 2.0,
+        ));
+        // The newest sentences sit at the bottom; older ones leave at the top.
+        ui.spawn(Node {
+            width: percent(100),
+            flex_grow: 1.0,
+            min_height: px(0),
+            overflow: Overflow::clip(),
+            flex_direction: FlexDirection::Column,
+            justify_content: JustifyContent::FlexEnd,
+            row_gap: px(4),
+            ..default()
+        })
+        .with_children(|ui| {
+            let paragraphs = story.paragraphs();
+            let start = paragraphs.len().saturating_sub(2);
+            for sentences in paragraphs.iter().skip(start) {
+                paragraph(ui, art, sentences, ink, false);
             }
-        }
+        });
     });
 }
 
-/// The story of one round over the whole screen: every event with its
-/// cards and influence changes, and what each player won or lost in the
-/// round. Tabs switch between rounds; the game waits while it is open.
+/// The story of one round over the whole screen, as a page of a book: the
+/// round's title, a paragraph for the placements and one for every card's
+/// turn, and what everyone has at the end. Tabs switch between rounds; the
+/// game waits while it is open.
 fn log_window(ui: &mut ChildSpawnerCommands, session: &Session, art: &CardArt, round: u8) {
     let story = session.log.iter().find(|story| story.round == round);
     let latest = session.log.last().is_some_and(|last| last.round == round);
+    let running = session.state.current_player().is_some();
     ui.spawn((
         Node {
             position_type: PositionType::Absolute,
@@ -1287,8 +1318,8 @@ fn log_window(ui: &mut ChildSpawnerCommands, session: &Session, art: &CardArt, r
         GlobalZIndex(5),
     ))
     .with_children(|ui| {
-        ui.spawn(text(t!("log-title"), 32.0, GOLD));
-        if session.state.current_player().is_some() {
+        ui.spawn(text(t!("log-title"), 30.0, GOLD));
+        if running {
             ui.spawn(text(t!("log-paused"), 16.0, DIM));
         }
         ui.spawn(row(8.0)).with_children(|ui| {
@@ -1304,7 +1335,6 @@ fn log_window(ui: &mut ChildSpawnerCommands, session: &Session, art: &CardArt, r
         let Some(story) = story else {
             return;
         };
-        round_totals(ui, story, session.state.players.len());
         ui.spawn((
             LogScroll,
             Node {
@@ -1314,39 +1344,156 @@ fn log_window(ui: &mut ChildSpawnerCommands, session: &Session, art: &CardArt, r
                 min_height: px(0),
                 overflow: Overflow::scroll_y(),
                 flex_direction: FlexDirection::Column,
-                padding: UiRect::all(px(14)),
-                row_gap: px(8),
-                border_radius: BorderRadius::all(px(10)),
+                padding: UiRect::axes(px(40), px(24)),
+                row_gap: px(14),
+                border: UiRect::all(px(3)),
+                border_radius: BorderRadius::all(px(12)),
                 ..default()
             },
             // The latest round opens at its newest events; the layout keeps
             // the position within the content.
             ScrollPosition(Vec2::new(0.0, if latest { 1.0e6 } else { 0.0 })),
-            BackgroundColor(PANEL),
+            BackgroundColor(PAGE),
+            BorderColor::all(INK),
         ))
-        .with_children(|ui| {
-            if story.lines.is_empty() {
-                ui.spawn(text(t!("log-empty"), LOG_WINDOW_TEXT, DIM));
-            }
-            for line in &story.lines {
-                log_line(ui, art, line, LOG_WINDOW_TEXT, PAPER);
-            }
-        });
+        .with_children(|ui| story_page(ui, art, story, !(latest && running)));
         button(ui, &t!("log-close"), Click::Log, true);
     });
 }
 
-/// What every player won or lost in a round.
-fn round_totals(ui: &mut ChildSpawnerCommands, story: &RoundLog, players: usize) {
-    ui.spawn(row(8.0)).with_children(|ui| {
-        ui.spawn(text(t!("log-total"), 18.0, PAPER));
-        for (player, total) in story.totals(players).into_iter().enumerate() {
-            change_chip(ui, player, total, 18.0);
+/// The page of one round's story. `finished` when the round is over.
+fn story_page(ui: &mut ChildSpawnerCommands, art: &CardArt, story: &RoundLog, finished: bool) {
+    let ink = Ink {
+        size: LOG_WINDOW_TEXT,
+        text: PAGE_INK,
+        name: CRIMSON,
+        font: Some(&art.story_font),
+    };
+    ui.spawn((
+        ink.words(t!("log-round-tab", round = story.round), CRIMSON, 34.0),
+        Node {
+            align_self: AlignSelf::Center,
+            ..default()
+        },
+    ));
+    ornament(ui);
+    let paragraphs = story.paragraphs();
+    if paragraphs.is_empty() {
+        ui.spawn(ink.words(t!("log-empty"), PAGE_DIM, LOG_WINDOW_TEXT));
+    }
+    for sentences in &paragraphs {
+        paragraph(ui, art, sentences, ink, true);
+    }
+    if let Some(standing) = story.standing() {
+        ornament(ui);
+        tally(ui, story, standing, finished, ink);
+    }
+}
+
+/// A thin line with a diamond in the middle, between parts of a page.
+fn ornament(ui: &mut ChildSpawnerCommands) {
+    let line = || {
+        (
+            Node {
+                width: px(90),
+                height: px(2),
+                ..default()
+            },
+            BackgroundColor(CRIMSON),
+        )
+    };
+    ui.spawn(Node {
+        flex_direction: FlexDirection::Row,
+        align_items: AlignItems::Center,
+        align_self: AlignSelf::Center,
+        column_gap: px(8),
+        flex_shrink: 0.0,
+        ..default()
+    })
+    .with_children(|ui| {
+        ui.spawn(line());
+        ui.spawn((
+            Node {
+                width: px(9),
+                height: px(9),
+                ..default()
+            },
+            BackgroundColor(CRIMSON),
+            UiTransform {
+                rotation: Rot2::degrees(45.0),
+                ..UiTransform::IDENTITY
+            },
+        ));
+        ui.spawn(line());
+    });
+}
+
+/// Everyone's influence at the end of the round, or so far, with what they
+/// won or lost in it.
+fn tally(
+    ui: &mut ChildSpawnerCommands,
+    story: &RoundLog,
+    standing: &[u32],
+    finished: bool,
+    ink: Ink,
+) {
+    let totals = story.totals(standing.len());
+    ui.spawn(Node {
+        width: percent(100),
+        flex_direction: FlexDirection::Row,
+        flex_wrap: FlexWrap::Wrap,
+        flex_shrink: 0.0,
+        justify_content: JustifyContent::Center,
+        align_items: AlignItems::Center,
+        column_gap: px(18),
+        row_gap: px(6),
+        ..default()
+    })
+    .with_children(|ui| {
+        let label = if finished {
+            t!("story-tally-final")
+        } else {
+            t!("story-tally-now")
+        };
+        ui.spawn(ink.words(label, PAGE_DIM, ink.size));
+        for (player, (&total, &change)) in standing.iter().zip(&totals).enumerate() {
+            let change = if change > 0 {
+                format!("+{change}")
+            } else {
+                change.to_string()
+            };
+            ui.spawn(Node {
+                flex_direction: FlexDirection::Row,
+                align_items: AlignItems::Center,
+                column_gap: px(6),
+                ..default()
+            })
+            .with_children(|ui| {
+                ui.spawn((
+                    Node {
+                        width: px(12),
+                        height: px(12),
+                        border_radius: BorderRadius::MAX,
+                        ..default()
+                    },
+                    BackgroundColor(family_color(player)),
+                ));
+                ui.spawn(ink.words(
+                    t!(
+                        "story-tally-item",
+                        player = player_name(player),
+                        total = total,
+                        change = change
+                    ),
+                    ink.text,
+                    ink.size,
+                ));
+            });
         }
     });
 }
 
-/// The scrolling list of the log window.
+/// The scrolling page of the log window.
 #[derive(Component)]
 pub struct LogScroll;
 
@@ -1371,25 +1518,41 @@ pub fn scroll_log(
     }
 }
 
-/// One line of the log.
-fn log_line(ui: &mut ChildSpawnerCommands, art: &CardArt, line: &LogLine, size: f32, ink: Color) {
-    match line {
-        LogLine::Entry(entry) => story_line(ui, art, entry, size, ink, JustifyContent::FlexStart),
-        LogLine::Error(error) => {
-            ui.spawn(text(t!("log-error", error = error.to_string()), size, LOSS));
+/// How the words of the story are drawn.
+#[derive(Clone, Copy)]
+struct Ink<'a> {
+    size: f32,
+    /// Colour of the words.
+    text: Color,
+    /// Colour of card names.
+    name: Color,
+    /// The story font, or `None` for the interface font.
+    font: Option<&'a Handle<Font>>,
+}
+
+impl Ink<'_> {
+    /// Text in this ink's font, in `color` and `size`.
+    fn words(&self, content: impl Into<String>, color: Color, size: f32) -> impl Bundle {
+        let mut font = TextFont {
+            font_size: FontSize::Px(size),
+            ..default()
+        };
+        if let Some(handle) = self.font {
+            font.font = handle.clone().into();
         }
+        (Text::new(content), font, TextColor(color))
     }
 }
 
-/// An event as a sentence with card miniatures, followed by the influence
-/// each player won or lost.
-fn story_line(
+/// A paragraph of the story, flowing like a page of a book: every word is
+/// its own node, so that lines break between words and around the card
+/// miniatures. `indent` starts the first line a little to the right.
+fn paragraph(
     ui: &mut ChildSpawnerCommands,
     art: &CardArt,
-    entry: &Entry,
-    size: f32,
-    ink: Color,
-    justify: JustifyContent,
+    sentences: &[Sentence],
+    ink: Ink,
+    indent: bool,
 ) {
     ui.spawn(Node {
         width: percent(100),
@@ -1397,48 +1560,102 @@ fn story_line(
         flex_wrap: FlexWrap::Wrap,
         flex_shrink: 0.0,
         align_items: AlignItems::Center,
-        justify_content: justify,
-        column_gap: px(size * 0.4),
+        column_gap: px(ink.size * 0.3),
+        row_gap: px(ink.size * 0.3),
+        ..default()
+    })
+    .with_children(|ui| {
+        if indent {
+            ui.spawn(Node {
+                width: px(ink.size),
+                ..default()
+            });
+        }
+        for sentence in sentences {
+            match sentence.line {
+                LogLine::Entry(entry) => {
+                    for piece in entry.story(sentence.lead) {
+                        match piece {
+                            Piece::Text(words) => {
+                                for word in words.split_whitespace() {
+                                    ui.spawn(ink.words(word, ink.text, ink.size));
+                                }
+                            }
+                            Piece::Card {
+                                card,
+                                prefix,
+                                suffix,
+                            } => story_card(ui, art, card, &prefix, &suffix, ink),
+                        }
+                    }
+                }
+                LogLine::Error(error) => {
+                    let line = t!("log-error", error = error.to_string());
+                    for word in line.split_whitespace() {
+                        ui.spawn(ink.words(word, RED, ink.size));
+                    }
+                }
+            }
+        }
+    });
+}
+
+/// An event as one sentence with card miniatures, followed by the influence
+/// each player won or lost: the headline while an action is shown.
+fn story_line(ui: &mut ChildSpawnerCommands, art: &CardArt, entry: &Entry) {
+    let ink = Ink {
+        size: 22.0,
+        text: PAPER,
+        name: GOLD,
+        font: None,
+    };
+    ui.spawn(Node {
+        width: percent(100),
+        flex_direction: FlexDirection::Row,
+        flex_wrap: FlexWrap::Wrap,
+        flex_shrink: 0.0,
+        align_items: AlignItems::Center,
+        justify_content: JustifyContent::Center,
+        column_gap: px(ink.size * 0.4),
         row_gap: px(3),
         ..default()
     })
     .with_children(|ui| {
-        for piece in entry.story() {
+        for piece in entry.story(true) {
             match piece {
                 Piece::Text(words) => {
                     let words = words.trim();
                     if !words.is_empty() {
-                        ui.spawn(text(words, size, ink));
+                        ui.spawn(ink.words(words, ink.text, ink.size));
                     }
                 }
                 Piece::Card {
                     card,
                     prefix,
                     suffix,
-                } => log_card(ui, art, card, &prefix, &suffix, size, ink),
+                } => story_card(ui, art, card, &prefix, &suffix, ink),
             }
         }
         for &(player, change) in &entry.changes {
-            change_chip(ui, player, change, size);
+            change_chip(ui, player, change, ink.size);
         }
     });
 }
 
-/// A card named in the log: its miniature framed in the owner's colour, then
-/// its name, with the punctuation around it.
-fn log_card(
+/// A card named in the story: its miniature framed in the owner's colour,
+/// then its name, with the punctuation that touches it. Kept on one line.
+fn story_card(
     ui: &mut ChildSpawnerCommands,
     art: &CardArt,
     card: Option<Seen>,
     prefix: &str,
     suffix: &str,
-    size: f32,
-    ink: Color,
+    ink: Ink,
 ) {
     let kind = card.and_then(|card| card.kind);
     let name = kind.map_or_else(|| t!("log-hidden-card"), card_name);
     let frame = card.map_or(DIM, |card| family_color(card.owner));
-    let edge = (size * 1.6).round();
+    let edge = (ink.size * 1.4).round();
     ui.spawn(Node {
         flex_direction: FlexDirection::Row,
         align_items: AlignItems::Center,
@@ -1446,7 +1663,7 @@ fn log_card(
     })
     .with_children(|ui| {
         if !prefix.is_empty() {
-            ui.spawn(text(prefix, size, ink));
+            ui.spawn(ink.words(prefix, ink.text, ink.size));
         }
         ui.spawn((
             Node {
@@ -1469,9 +1686,10 @@ fn log_card(
             )],
         ));
         // A card name stands out; the words for a hidden card do not.
-        ui.spawn(text(name, size, if kind.is_some() { GOLD } else { ink }));
+        let color = if kind.is_some() { ink.name } else { ink.text };
+        ui.spawn(ink.words(name, color, ink.size));
         if !suffix.is_empty() {
-            ui.spawn(text(suffix, size, ink));
+            ui.spawn(ink.words(suffix, ink.text, ink.size));
         }
     });
 }

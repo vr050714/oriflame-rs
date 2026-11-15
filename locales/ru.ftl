@@ -75,32 +75,96 @@ decree-pick-card = Королевский указ: выберите карту,
 decree-pick-place = Королевский указ: выберите новое место для карты.
 pick-target = { $card }: выберите выделенную карту.
 
-## Game log. Each line describes one event.
+## Story of the game. Card names stay in the nominative: "карту { $card }".
 
-log-round = Начинается раунд { $round }.
-log-placed-left = { $player }: в начало очереди — { $card }.
-log-placed-right = { $player }: в конец очереди — { $card }.
-log-placed-stack = { $player }: поверх своей карты ({ $target }) — { $card }.
-log-kept-hidden = { $player }: карта не раскрыта — { $card }, влияния на ней: { $influence }.
-log-revealed = { $player }: раскрыта карта { $card }.
-log-gained = { $player }: { $card } приносит влияния: { $amount }.
-log-stole = { $player }: { $card } крадёт 1 очко влияния (у кого: { $victim }, соседняя карта: { $target }).
-log-copied = { $player }: { $card } копирует карту { $target } ({ $owner }).
-log-eliminated = { $player }: { $card } устраняет карту { $target } ({ $owner }).
-log-eliminated-self = { $player }: { $card } устраняет сам себя.
-log-ambushed = { $player }: { $card } нападает на карту { $target } ({ $owner }) и попадает в засаду.
-log-discarded = { $player }: сброшена карта { $card }.
-log-moved = { $player }: { $card } перемещает на позицию { $position }: { $target } ({ $owner }).
+story-actor = { $lead ->
+    [yes] { $player_you ->
+        [yes] Ваша карта { $card }
+       *[other] Карта { $card } игрока { $player }
+    }
+   *[other] Она
+}
+story-amount = { $amount } { $amount ->
+    [one] очко
+    [few] очка
+   *[other] очков
+} влияния
+story-round = Начинается раунд { $round }.
+story-placed-left = { $player_you ->
+    [yes] Вы кладёте
+   *[other] { $player } кладёт
+} карту { $card } в начало очереди.
+story-placed-right = { $player_you ->
+    [yes] Вы кладёте
+   *[other] { $player } кладёт
+} карту { $card } в конец очереди.
+story-placed-stack = { $player_you ->
+    [yes] Вы кладёте
+   *[other] { $player } кладёт
+} карту { $card } поверх карты { $target }.
+story-kept-hidden = { $player_you ->
+    [yes] Вы не раскрываете
+   *[other] { $player } не раскрывает
+} карту { $card }, и ставка на ней растёт до { $amount }.
+story-revealed = { $player_you ->
+    [yes] Вы раскрываете
+   *[other] { $player } раскрывает
+} карту { $card }.
+story-revealed-gain = { $player_you ->
+    [yes] Вы раскрываете карту { $card } и забираете
+   *[other] { $player } раскрывает карту { $card } и забирает
+} { story-amount }.
+story-gained = { story-actor } приносит { story-amount }.
+story-stole = { story-actor } тянется мимо карты { $target } и крадёт 1 очко влияния у { $victim_you ->
+    [yes] вас
+   *[other] { $victim }
+}.
+story-copied = { story-actor } принимает облик { $owner_you ->
+    [yes] вашей карты { $target }
+   *[other] карты { $target } игрока { $owner }
+}.
+story-eliminated = { story-actor } устраняет { $owner_you ->
+    [yes] вашу карту { $target }
+   *[other] карту { $target } игрока { $owner }
+}, и { $player_you ->
+    [yes] вы получаете
+   *[other] { $player } получает
+} 1 очко влияния.
+story-eliminated-self = { story-actor } устраняет сама себя, и { $player_you ->
+    [yes] вы получаете
+   *[other] { $player } получает
+} 1 очко влияния.
+story-ambushed = { story-actor } нападает на { $owner_you ->
+    [yes] вашу карту { $target }
+   *[other] карту { $target } игрока { $owner }
+} и попадает в ловушку: { $owner_you ->
+    [yes] вы получаете
+   *[other] { $owner } получает
+} { story-amount }, { $player_you ->
+    [yes] вы
+   *[other] { $player }
+} — 1 очко.
+story-ambushed-own = { story-actor } попадает в { $player_you ->
+    [yes] вашу собственную
+   *[other] собственную
+} карту { $target }, и это приносит { story-amount }.
+story-discarded = { story-actor } уходит в сброс.
+story-moved = { story-actor } переносит карту { $target } на { $position }-е место в очереди.
+story-tally-final = К концу раунда:
+story-tally-now = Пока что:
+story-tally-item = { $player }: { $total } ({ $change })
+
+## Game log on the board and in the log window.
+
 log-error = Ошибка: { $error }
-log-hidden-card = закрытая карта
+log-hidden-card = рубашкой вверх
 log-change = { $player } { $amount }
-log-total = Итог раунда:
 log-empty = В этом раунде ещё ничего не произошло.
 log-open = Журнал
-log-title = Журнал игры
+log-title = История партии
 log-round-tab = Раунд { $round }
 log-close = Закрыть
-log-paused = Пока журнал открыт, игра ждёт.
+log-paused = Пока история открыта, игра ждёт.
 
 ## Labels on cards while an action is shown
 
