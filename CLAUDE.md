@@ -35,7 +35,7 @@ python -m http.server -d dist               # serve dist/ locally
 
 - A cold Bevy build takes 10 to 25 minutes and a lot of memory on this machine. Use `-j 4` if memory is short. Changing Bevy features or adding a dependency that Bevy shares (for example `winit`) triggers a full rebuild.
 - `cargo build --release` fails to overwrite the exe while the game is running. Close the game first.
-- The root package has one test module, `i18n::tests` (`cargo test -p oriflamme-rs i18n`), which checks the translation files.
+- The root package has two test modules: `i18n::tests` (`cargo test -p oriflamme-rs i18n`) checks the translation files; `game::tests` checks the game log (influence changes add up, hidden cards stay hidden, sentences split around card miniatures).
 
 ## Lints: no panics, no unsafe
 
@@ -78,10 +78,11 @@ Depends only on `oriflamme-core`.
 - UI is plain `bevy_ui`, rebuilt from scratch: `screens::rebuild_ui` despawns the `UiRoot` tree and respawns it whenever `UiDirty` is set or the `Screen` state changes. There is no incremental UI update; to change what is shown, change state and set `UiDirty`.
 - Input: every clickable node carries a `Click` component. One global observer, `screens::on_click`, handles `On<Activate>` from `bevy::ui_widgets::Button`.
 - `game::Session` (a resource that exists only once a game has started) owns the `GameState`, the log, and the human's in-progress selections. The human is always seat 0 (`HUMAN`).
-- Playback: `Session::apply` calls `apply_traced` and turns each `Step` into one or more `Scene`s (`scenes_for` in `game.rs`): a frozen copy of the table, `Mark`s for the acting and affected cards, a sentence, and a duration. `play_scenes` advances them on a timer. While a scene is showing, `board` draws the scene's table instead of the live one, `human_turn()` is false, and `bot_turns` does nothing. Scene durations and labels live in `scenes_for`.
+- Playback: `Session::apply` calls `apply_traced` and turns each `Step` into one or more `Scene`s (`scenes_for` in `game.rs`): a frozen copy of the table, `Mark`s for the acting and affected cards, the step's log `Entry` (shown as the headline), and a duration. `play_scenes` advances them on a timer. While a scene is showing, `board` draws the scene's table instead of the live one, `human_turn()` is false, and `bot_turns` does nothing. Scene durations and labels live in `scenes_for`.
+- Game log: `Session::log` is a `Vec<RoundLog>`, one per round. Each line is an `Entry` built by `Entry::from_step`: the event, the acting and affected cards as `Seen` (an opponent's face-down card has no kind, so the log never leaks it), and each player's influence change, taken from the step's before/after snapshots. An entry is logged when its scene is shown, not when the action is applied. `Entry::story` formats the `log-*` message with private-use marks in place of `$card`/`$target` and cuts it into `Piece`s, so the UI can draw a card miniature next to each card name; translations must therefore keep card names in a form that needs no grammatical case. The board shows the last lines (`recent_story`); the Log button opens `log_window`, a per-round view with round totals, scrolled by `scroll_log`. The game (playback and bots) waits while `Session::log_window` is `Some`.
 - Animation: a `Motion` component (`Pulse`, `Vanish`, `Arrive`, `Bob`) plus `screens::animate`, which drives `UiTransform` from a per-node clock. Clocks restart on every UI rebuild.
 - Bots: `game::bot_turns` builds the strategy with `make_strategy` inside a task on `AsyncComputeTaskPool` and polls it with `check_ready`, so a long search does not block the window.
-- Images are compiled into the exe with `include_bytes!` and decoded once into the `CardArt` resource (`screens.rs`). The game does not use the asset server for them, so the exe runs from any folder. Adding an image means adding it to `CardArt`.
+- Images are compiled into the exe with `include_bytes!` and decoded once into the `CardArt` resource (`screens.rs`), card miniatures for the log included. The game does not use the asset server for them, so the exe runs from any folder. Adding an image means adding it to `CardArt`.
 - Text: every string shown on screen comes from `locales/<tag>.ftl` (Fluent, via `fluent-bundle`), never from a literal in the code. `i18n.rs` holds the `Language` enum, the current language (a global, switched with `set_language`), and the `t!("key", name = value)` macro. Card names and rules text are `card-<slug>` and `card-<slug>-text`; the English strings in `oriflamme-core` (`CardKind::name`, `description`) are not shown. Translation happens while the UI is drawn: the log stores `LogLine`s and scenes store `Event`s, so a language change only needs `UiDirty`. `en.ftl` is the reference; a test checks that every `.ftl` has exactly its message ids. To add a language, add a `Language` variant and its `.ftl` file. The drop-down in the top right corner is `screens::language_picker`.
 - Font: Bevy's `default_font` (ASCII only) is turned off. `main::install_font` puts `assets/fonts/FiraMono-Regular.ttf` (Fira Mono reduced to Latin, Latin Extended and Cyrillic, OFL) into the default font handle. A language with other letters needs a font that has them.
 - `main.rs` forces the DX12 backend on Windows unless `WGPU_BACKEND` is set: the Vulkan driver on the development machine's Intel GPU segfaults at start-up.
@@ -90,7 +91,7 @@ Depends only on `oriflamme-core`.
 
 ### `crates/oriflamme-art`: art pipeline
 
-`art/` holds hand-written SVG sources; `assets/` holds generated PNG and ICO files, which are committed. `cargo run -p oriflamme-art` rasterises `art/cards/*.svg` and `art/ui/*.svg` with `resvg` and writes `assets/icon.png` and `assets/icon.ico` from `art/icon.svg`. SVGs contain no text, because the rasteriser is built without fonts; card names are drawn by Bevy.
+`art/` holds hand-written SVG sources; `assets/` holds generated PNG and ICO files, which are committed. `cargo run -p oriflamme-art` rasterises `art/cards/*.svg`, `art/mini/*.svg` (64 px card miniatures for the game log: one symbol per card in the card's colours) and `art/ui/*.svg` with `resvg` and writes `assets/icon.png` and `assets/icon.ico` from `art/icon.svg`. SVGs contain no text, because the rasteriser is built without fonts; card names are drawn by Bevy.
 
 ## Bevy 0.20 API
 

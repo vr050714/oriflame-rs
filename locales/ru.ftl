@@ -78,19 +78,29 @@ pick-target = { $card }: выберите выделенную карту.
 ## Game log. Each line describes one event.
 
 log-round = Начинается раунд { $round }.
-log-placed-left = { $player }: карта положена в начало очереди.
-log-placed-right = { $player }: карта положена в конец очереди.
-log-placed-stack = { $player }: карта положена поверх своей карты.
-log-kept-hidden = { $player }: карта остаётся закрытой (влияния на ней: { $influence }).
-log-revealed = { $player }: раскрыта карта «{ $card }», получено влияния: { $gained }.
-log-gained = { $player }: получено влияния: { $amount }.
-log-stole = { $thief }: украдено 1 очко влияния (у кого: { $victim }).
-log-copied = { $player }: Оборотень копирует карту «{ $card }».
-log-eliminated = { $player }: «{ $card }» устраняет «{ $target }» ({ $owner }) (+1).
-log-ambushed = { $player }: «{ $card }» попадает в Засаду ({ $owner }) (+{ $gained } за Засаду).
-log-discarded = { $player }: сброшена карта «{ $card }».
-log-moved = { $player }: карта ({ $owner }) перемещена на позицию { $position }.
+log-placed-left = { $player }: в начало очереди — { $card }.
+log-placed-right = { $player }: в конец очереди — { $card }.
+log-placed-stack = { $player }: поверх своей карты ({ $target }) — { $card }.
+log-kept-hidden = { $player }: карта не раскрыта — { $card }, влияния на ней: { $influence }.
+log-revealed = { $player }: раскрыта карта { $card }.
+log-gained = { $player }: { $card } приносит влияния: { $amount }.
+log-stole = { $player }: { $card } крадёт 1 очко влияния (у кого: { $victim }, соседняя карта: { $target }).
+log-copied = { $player }: { $card } копирует карту { $target } ({ $owner }).
+log-eliminated = { $player }: { $card } устраняет карту { $target } ({ $owner }).
+log-eliminated-self = { $player }: { $card } устраняет сам себя.
+log-ambushed = { $player }: { $card } нападает на карту { $target } ({ $owner }) и попадает в засаду.
+log-discarded = { $player }: сброшена карта { $card }.
+log-moved = { $player }: { $card } перемещает на позицию { $position }: { $target } ({ $owner }).
 log-error = Ошибка: { $error }
+log-hidden-card = закрытая карта
+log-change = { $player } { $amount }
+log-total = Итог раунда:
+log-empty = В этом раунде ещё ничего не произошло.
+log-open = Журнал
+log-title = Журнал игры
+log-round-tab = Раунд { $round }
+log-close = Закрыть
+log-paused = Пока журнал открыт, игра ждёт.
 
 ## Labels on cards while an action is shown
 

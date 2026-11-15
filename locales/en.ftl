@@ -72,22 +72,34 @@ decree-pick-card = Royal Decree: pick the card to move.
 decree-pick-place = Royal Decree: pick the new place for the card.
 pick-target = { $card }: pick a highlighted card.
 
-## Game log. Each line describes one event.
+## Game log. Each line tells one event. { $card } (the card that acts) and
+## { $target } (the card acted upon) are drawn as a miniature and the card's
+## name, or as a hidden card, so keep them in a form that needs no grammatical case.
 
 log-round = Round { $round } begins.
-log-placed-left = { $player } placed a card at the start of the queue.
-log-placed-right = { $player } placed a card at the end of the queue.
-log-placed-stack = { $player } placed a card on top of an own card.
-log-kept-hidden = { $player } kept a card hidden ({ $influence } influence on it).
-log-revealed = { $player } revealed { $card } and took { $gained } influence.
-log-gained = { $player } gained { $amount } influence.
-log-stole = { $thief } stole 1 influence from { $victim }.
-log-copied = { $player }: Shapeshifter copies { $card }.
-log-eliminated = { $player }: { $card } eliminated { $target } of { $owner } (+1).
-log-ambushed = { $player }: { $card } hit an Ambush of { $owner } (+{ $gained } for the Ambush).
+log-placed-left = { $player } placed { $card } at the start of the queue.
+log-placed-right = { $player } placed { $card } at the end of the queue.
+log-placed-stack = { $player } placed { $card } on top of { $target }.
+log-kept-hidden = { $player } kept { $card } hidden; it now holds { $influence } influence.
+log-revealed = { $player } revealed { $card }.
+log-gained = { $player }: { $card } brought { $amount } influence.
+log-stole = { $player }: { $card } stole 1 influence from { $victim } (next to { $target }).
+log-copied = { $player }: { $card } copied { $target } ({ $owner }).
+log-eliminated = { $player }: { $card } eliminated { $target } ({ $owner }).
+log-eliminated-self = { $player }: { $card } eliminated itself.
+log-ambushed = { $player }: { $card } attacked { $target } ({ $owner }) and fell into the ambush.
 log-discarded = { $player } discarded { $card }.
-log-moved = { $player } moved a card of { $owner } to position { $position }.
+log-moved = { $player }: { $card } moved { $target } ({ $owner }) to position { $position }.
 log-error = Error: { $error }
+log-hidden-card = a face-down card
+log-change = { $player } { $amount }
+log-total = Round total:
+log-empty = Nothing has happened in this round yet.
+log-open = Log
+log-title = Game log
+log-round-tab = Round { $round }
+log-close = Close
+log-paused = The game waits while the log is open.
 
 ## Labels on cards while an action is shown
 

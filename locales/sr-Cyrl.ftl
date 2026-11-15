@@ -77,19 +77,29 @@ pick-target = { $card }: изаберите истакнуту карту.
 ## Game log. Each line describes one event.
 
 log-round = Почиње рунда { $round }.
-log-placed-left = { $player }: карта је стављена на почетак реда.
-log-placed-right = { $player }: карта је стављена на крај реда.
-log-placed-stack = { $player }: карта је стављена преко сопствене карте.
-log-kept-hidden = { $player }: карта остаје скривена (утицај на њој: { $influence }).
-log-revealed = { $player }: откривена је карта „{ $card }“, добијено утицаја: { $gained }.
-log-gained = { $player }: добијено утицаја: { $amount }.
-log-stole = { $thief }: украден 1 поен утицаја (од: { $victim }).
-log-copied = { $player }: Мењач облика копира карту „{ $card }“.
-log-eliminated = { $player }: „{ $card }“ елиминише „{ $target }“ ({ $owner }) (+1).
-log-ambushed = { $player }: „{ $card }“ упада у Заседу ({ $owner }) (+{ $gained } за Заседу).
-log-discarded = { $player }: одбачена је карта „{ $card }“.
-log-moved = { $player }: карта ({ $owner }) премештена је на позицију { $position }.
+log-placed-left = { $player }: на почетак реда — { $card }.
+log-placed-right = { $player }: на крај реда — { $card }.
+log-placed-stack = { $player }: преко сопствене карте ({ $target }) — { $card }.
+log-kept-hidden = { $player }: карта није откривена — { $card }, утицај на њој: { $influence }.
+log-revealed = { $player }: откривена је карта { $card }.
+log-gained = { $player }: { $card } доноси утицаја: { $amount }.
+log-stole = { $player }: { $card } краде 1 поен утицаја (од: { $victim }, суседна карта: { $target }).
+log-copied = { $player }: { $card } копира карту { $target } ({ $owner }).
+log-eliminated = { $player }: { $card } елиминише карту { $target } ({ $owner }).
+log-eliminated-self = { $player }: { $card } елиминише самог себе.
+log-ambushed = { $player }: { $card } напада карту { $target } ({ $owner }) и упада у заседу.
+log-discarded = { $player }: одбачена је карта { $card }.
+log-moved = { $player }: { $card } помера на позицију { $position }: { $target } ({ $owner }).
 log-error = Грешка: { $error }
+log-hidden-card = скривена карта
+log-change = { $player } { $amount }
+log-total = Укупно у рунди:
+log-empty = У овој рунди се још ништа није догодило.
+log-open = Дневник
+log-title = Дневник игре
+log-round-tab = Рунда { $round }
+log-close = Затвори
+log-paused = Док је дневник отворен, игра чека.
 
 ## Labels on cards while an action is shown
 

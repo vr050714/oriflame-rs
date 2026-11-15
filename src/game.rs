@@ -3,7 +3,6 @@
 
 use crate::{
     Screen,
-    i18n::card_name,
     screens::{Motion, UiDirty},
     t,
 };
@@ -13,8 +12,8 @@ use bevy::{
 };
 use oriflamme_ai::{Difficulty, make_strategy};
 use oriflamme_core::{
-    Action, CardKind, Event, GameState, MIN_PLAYERS, PlayerId, Rng64, RuleError, SetupError, Slot,
-    Snapshot, Stack, Step,
+    Action, Card, CardKind, Event, GameState, MIN_PLAYERS, PlayerId, QueueCard, Rng64, RuleError,
+    SetupError, Slot, Snapshot, Stack, Step,
 };
 use std::{
     collections::VecDeque,
@@ -148,42 +147,357 @@ impl Mark {
 }
 
 /// One step of an action as it is shown to the player: a frozen table, the
-/// cards involved, and the event, which [`describe`] puts into a sentence.
+/// cards involved, and the story entry of the event, shown as the headline.
 pub struct Scene {
     pub queue: Vec<Stack>,
     pub influence: Vec<u32>,
-    pub event: Event,
+    pub entry: Entry,
     pub marks: Vec<Mark>,
+    /// False for the second scene of an event shown in two, so that the
+    /// event is logged once.
+    first: bool,
     seconds: f32,
 }
 
 impl Scene {
-    fn new(table: Snapshot, event: Event, marks: Vec<Mark>, seconds: f32) -> Self {
+    fn new(table: Snapshot, entry: &Entry, marks: Vec<Mark>, seconds: f32) -> Self {
         Self {
             queue: table.queue,
             influence: table.influence,
-            event,
+            entry: entry.clone(),
             marks,
+            first: true,
             seconds,
         }
     }
 }
 
-/// One line of the game log. Kept untranslated, so the log follows the
-/// language when it is changed.
-#[derive(Clone, Copy, PartialEq, Eq)]
+/// A card as the human knows it: the kind of an opponent's face-down card is
+/// unknown.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Seen {
+    pub owner: PlayerId,
+    pub kind: Option<CardKind>,
+}
+
+impl Seen {
+    /// A card whose identity is public.
+    fn open(card: Card) -> Self {
+        Self {
+            owner: card.owner,
+            kind: Some(card.kind),
+        }
+    }
+
+    /// A card in the queue, as the human sees it.
+    fn in_queue(card: &QueueCard) -> Self {
+        let known = card.face_up || card.card.owner == HUMAN;
+        Self {
+            owner: card.card.owner,
+            kind: known.then_some(card.card.kind),
+        }
+    }
+}
+
+/// Text written in place of the acting card and the affected card, so that
+/// a translated sentence can be cut where the card miniatures go.
+const ACTOR_MARK: char = '\u{E000}';
+const TARGET_MARK: char = '\u{E001}';
+
+/// A part of a story sentence.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Piece {
+    Text(String),
+    /// A card, drawn as its miniature and name, between the punctuation that
+    /// touches the name in the sentence, such as brackets.
+    Card {
+        card: Option<Seen>,
+        prefix: String,
+        suffix: String,
+    },
+}
+
+/// One event in the story of a round: what happened, which card acted on
+/// which, and who won or lost influence. Kept untranslated, so the log
+/// follows the language when it is changed.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Entry {
+    pub event: Event,
+    /// The card that acts, or the card the event is about.
+    pub actor: Option<Seen>,
+    /// The card acted upon.
+    pub target: Option<Seen>,
+    /// Influence won (positive) or lost by each player whose influence
+    /// changed, in seat order.
+    pub changes: Vec<(PlayerId, i64)>,
+}
+
+/// The top card at `pos`, as the human sees it.
+fn top_seen(table: &Snapshot, pos: usize) -> Option<Seen> {
+    table
+        .queue
+        .get(pos)
+        .and_then(|stack| stack.last())
+        .map(Seen::in_queue)
+}
+
+impl Entry {
+    /// The story entry of one step of an action.
+    pub fn from_step(step: &Step) -> Self {
+        let Step {
+            event,
+            before,
+            after,
+        } = step;
+        let (actor, target) = match *event {
+            Event::RoundStarted(_) | Event::GameOver => (None, None),
+            Event::Placed { slot, .. } => {
+                let pos = match slot {
+                    Slot::Left => 0,
+                    Slot::Right => after.queue.len().saturating_sub(1),
+                    Slot::OnStack(pos) => pos,
+                };
+                let stack = after.queue.get(pos);
+                let placed = stack.and_then(|stack| stack.last()).map(Seen::in_queue);
+                // The card it now covers.
+                let covered = match slot {
+                    Slot::OnStack(_) => stack
+                        .and_then(|stack| stack.iter().rev().nth(1))
+                        .map(Seen::in_queue),
+                    Slot::Left | Slot::Right => None,
+                };
+                (placed, covered)
+            }
+            Event::KeptHidden { pos, .. } => (top_seen(after, pos), None),
+            Event::Revealed { card, .. } | Event::Discarded { card, .. } => {
+                (Some(Seen::open(card)), None)
+            }
+            Event::Gained { pos, .. } => (pos.and_then(|pos| top_seen(after, pos)), None),
+            Event::Stole { pos, target, .. } | Event::Copied { pos, target, .. } => (
+                pos.and_then(|pos| top_seen(after, pos)),
+                top_seen(after, target),
+            ),
+            Event::Eliminated { by, target, .. } => {
+                (Some(Seen::open(by)), Some(Seen::open(target)))
+            }
+            Event::Ambushed {
+                attacker, owner, ..
+            } => (
+                Some(Seen::open(attacker)),
+                Some(Seen::open(Card {
+                    owner,
+                    kind: CardKind::Ambush,
+                })),
+            ),
+            // Only a Royal Decree moves cards.
+            Event::Moved { player, from, .. } => (
+                Some(Seen::open(Card {
+                    owner: player,
+                    kind: CardKind::RoyalDecree,
+                })),
+                top_seen(before, from),
+            ),
+        };
+        let changes = before
+            .influence
+            .iter()
+            .zip(&after.influence)
+            .enumerate()
+            .filter_map(|(player, (&was, &now))| {
+                let change = i64::from(now).saturating_sub(i64::from(was));
+                (change != 0).then_some((player, change))
+            })
+            .collect();
+        Self {
+            event: *event,
+            actor,
+            target,
+            changes,
+        }
+    }
+
+    /// The event as a sentence in the current language, cut into text and
+    /// the cards it mentions.
+    pub fn story(&self) -> Vec<Piece> {
+        let card = || ACTOR_MARK.to_string();
+        let target = || TARGET_MARK.to_string();
+        let owner = |seen: Option<Seen>| seen.map_or_else(String::new, |s| player_name(s.owner));
+        let sentence = match self.event {
+            Event::RoundStarted(round) => t!("log-round", round = round),
+            Event::Placed { player, slot } => {
+                let key = match slot {
+                    Slot::Left => "log-placed-left",
+                    Slot::Right => "log-placed-right",
+                    Slot::OnStack(_) => "log-placed-stack",
+                };
+                t!(
+                    key,
+                    player = player_name(player),
+                    card = card(),
+                    target = target()
+                )
+            }
+            Event::KeptHidden {
+                player, influence, ..
+            } => t!(
+                "log-kept-hidden",
+                player = player_name(player),
+                card = card(),
+                influence = influence
+            ),
+            Event::Revealed { card: revealed, .. } => t!(
+                "log-revealed",
+                player = player_name(revealed.owner),
+                card = card()
+            ),
+            Event::Gained { player, amount, .. } => t!(
+                "log-gained",
+                player = player_name(player),
+                card = card(),
+                amount = amount
+            ),
+            Event::Stole { thief, victim, .. } => t!(
+                "log-stole",
+                player = player_name(thief),
+                card = card(),
+                victim = player_name(victim),
+                target = target()
+            ),
+            Event::Copied { player, .. } => t!(
+                "log-copied",
+                player = player_name(player),
+                card = card(),
+                target = target(),
+                owner = owner(self.target)
+            ),
+            Event::Eliminated {
+                by, target: hit, ..
+            } if by == hit => t!(
+                "log-eliminated-self",
+                player = player_name(by.owner),
+                card = card()
+            ),
+            Event::Eliminated {
+                by, target: hit, ..
+            } => t!(
+                "log-eliminated",
+                player = player_name(by.owner),
+                card = card(),
+                target = target(),
+                owner = player_name(hit.owner)
+            ),
+            Event::Ambushed {
+                attacker, owner, ..
+            } => t!(
+                "log-ambushed",
+                player = player_name(attacker.owner),
+                card = card(),
+                target = target(),
+                owner = player_name(owner)
+            ),
+            Event::Discarded { card: gone, .. } => t!(
+                "log-discarded",
+                player = player_name(gone.owner),
+                card = card()
+            ),
+            Event::Moved {
+                player,
+                moved_owner,
+                to,
+                ..
+            } => t!(
+                "log-moved",
+                player = player_name(player),
+                card = card(),
+                target = target(),
+                owner = player_name(moved_owner),
+                position = to.saturating_add(1)
+            ),
+            Event::GameOver => t!("game-is-over"),
+        };
+        split_story(&sentence, self.actor, self.target)
+    }
+}
+
+/// Cuts a sentence at the card marks. Punctuation that touches a mark
+/// stays with its card, so that it is not drawn apart from the name.
+fn split_story(sentence: &str, actor: Option<Seen>, target: Option<Seen>) -> Vec<Piece> {
+    let mut pieces = Vec::new();
+    // Text since the last card, the card's suffix included.
+    let mut text = String::new();
+    let mut card: Option<(Option<Seen>, String)> = None;
+    let finish_card =
+        |pieces: &mut Vec<Piece>, card: Option<(Option<Seen>, String)>, text: &mut String| {
+            if let Some((seen, prefix)) = card {
+                let split = text.find(char::is_whitespace).unwrap_or(text.len());
+                let rest = text.split_off(split);
+                pieces.push(Piece::Card {
+                    card: seen,
+                    prefix,
+                    suffix: std::mem::replace(text, rest),
+                });
+            }
+        };
+    for c in sentence.chars() {
+        let seen = match c {
+            ACTOR_MARK => actor,
+            TARGET_MARK => target,
+            _ => {
+                text.push(c);
+                continue;
+            }
+        };
+        finish_card(&mut pieces, card.take(), &mut text);
+        let split = text
+            .rfind(char::is_whitespace)
+            .map_or(0, |at| at.saturating_add(1));
+        let prefix = text.split_off(split);
+        if !text.is_empty() {
+            pieces.push(Piece::Text(std::mem::take(&mut text)));
+        }
+        card = Some((seen, prefix));
+    }
+    finish_card(&mut pieces, card, &mut text);
+    if !text.is_empty() {
+        pieces.push(Piece::Text(text));
+    }
+    pieces
+}
+
+/// One line of the game log.
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub enum LogLine {
-    Event(Event),
+    Entry(Entry),
     Error(RuleError),
 }
 
-impl LogLine {
-    /// The line in the current language.
-    pub fn text(self) -> String {
-        match self {
-            LogLine::Event(event) => describe(event),
-            LogLine::Error(error) => t!("log-error", error = error.to_string()),
+/// The story of one round, oldest event first.
+pub struct RoundLog {
+    pub round: u8,
+    pub lines: Vec<LogLine>,
+}
+
+impl RoundLog {
+    fn new(round: u8) -> Self {
+        Self {
+            round,
+            lines: Vec::new(),
         }
+    }
+
+    /// Influence each of `players` players won or lost in the round.
+    pub fn totals(&self, players: usize) -> Vec<i64> {
+        let mut totals = vec![0_i64; players];
+        let changes = self.lines.iter().flat_map(|line| match line {
+            LogLine::Entry(entry) => entry.changes.as_slice(),
+            LogLine::Error(_) => &[],
+        });
+        for &(player, change) in changes {
+            if let Some(total) = totals.get_mut(player) {
+                *total = total.saturating_add(change);
+            }
+        }
+        totals
     }
 }
 
@@ -193,8 +507,11 @@ pub struct Session {
     pub state: GameState,
     pub difficulty: Difficulty,
     pub rng: Rng64,
-    /// Game log, oldest first.
-    pub log: Vec<LogLine>,
+    /// Game log: the story of every round so far, oldest first.
+    pub log: Vec<RoundLog>,
+    /// The round whose story the log window shows, while it is open. The
+    /// game waits while the window is open.
+    pub log_window: Option<u8>,
     /// Hand card the human picked and is about to place.
     pub selected: Option<CardKind>,
     /// Royal Decree: the position the human picked to move a card from.
@@ -218,7 +535,8 @@ impl Session {
             state,
             difficulty: settings.difficulty,
             rng,
-            log: vec![LogLine::Event(Event::RoundStarted(1))],
+            log: vec![RoundLog::new(1)],
+            log_window: None,
             selected: None,
             move_from: None,
             scene: None,
@@ -234,7 +552,27 @@ impl Session {
 
     /// True when the human must act.
     pub fn human_turn(&self) -> bool {
-        !self.playing_back() && self.state.current_player() == Some(HUMAN)
+        !self.playing_back()
+            && self.log_window.is_none()
+            && self.state.current_player() == Some(HUMAN)
+    }
+
+    /// Adds a line to the story of the current round.
+    fn record(&mut self, line: LogLine) {
+        if let LogLine::Entry(Entry {
+            event: Event::RoundStarted(round),
+            ..
+        }) = line
+        {
+            self.log.push(RoundLog::new(round));
+            return;
+        }
+        if self.log.is_empty() {
+            self.log.push(RoundLog::new(self.state.round));
+        }
+        if let Some(round) = self.log.last_mut() {
+            round.lines.push(line);
+        }
     }
 
     /// Applies an action for the current player and queues its scenes.
@@ -246,7 +584,7 @@ impl Session {
                     self.next_scene();
                 }
             }
-            Err(error) => self.log.push(LogLine::Error(error)),
+            Err(error) => self.record(LogLine::Error(error)),
         }
         self.selected = None;
         self.move_from = None;
@@ -255,19 +593,24 @@ impl Session {
     /// Shows the next queued scene, or returns to the live table.
     fn next_scene(&mut self) {
         self.scene = self.scenes.pop_front();
-        if let Some(scene) = &self.scene {
-            // An action shown in two scenes is logged once.
-            let line = LogLine::Event(scene.event);
-            if self.log.last() != Some(&line) {
-                self.log.push(line);
-            }
-            self.scene_timer = Timer::from_seconds(scene.seconds, TimerMode::Once);
+        let Some(scene) = &self.scene else {
+            return;
+        };
+        self.scene_timer = Timer::from_seconds(scene.seconds, TimerMode::Once);
+        // An event shown in two scenes is logged once.
+        if scene.first {
+            let line = LogLine::Entry(scene.entry.clone());
+            self.record(line);
         }
     }
 }
 
 /// Advances the playback of the last action.
 pub fn play_scenes(time: Res<Time>, mut session: ResMut<Session>, mut dirty: ResMut<UiDirty>) {
+    // The playback waits while the log window is open.
+    if session.log_window.is_some() {
+        return;
+    }
     if session.playing_back() && session.scene_timer.tick(time.delta()).is_finished() {
         session.next_scene();
         dirty.0 = true;
@@ -285,6 +628,8 @@ pub fn player_name(player: PlayerId) -> String {
 
 /// The scenes that show one event.
 fn scenes_for(step: Step) -> Vec<Scene> {
+    let entry = Entry::from_step(&step);
+    let entry = &entry;
     let Step {
         event,
         mut before,
@@ -300,7 +645,7 @@ fn scenes_for(step: Step) -> Vec<Scene> {
         pos.map(|pos| Mark::new(pos, Role::Actor, label, Motion::Pulse))
     };
     match event {
-        Event::RoundStarted(_) => vec![Scene::new(after, event, Vec::new(), 0.9)],
+        Event::RoundStarted(_) => vec![Scene::new(after, entry, Vec::new(), 0.9)],
         Event::GameOver => Vec::new(),
         Event::Placed { slot, .. } => {
             let pos = match slot {
@@ -309,12 +654,12 @@ fn scenes_for(step: Step) -> Vec<Scene> {
                 Slot::OnStack(pos) => pos,
             };
             let marks = vec![Mark::new(pos, Role::Actor, None, Motion::Arrive)];
-            vec![Scene::new(after, event, marks, 0.8)]
+            vec![Scene::new(after, entry, marks, 0.8)]
         }
         Event::KeptHidden { pos, .. } => {
             vec![Scene::new(
                 after,
-                event,
+                entry,
                 actor(Some(pos), Some(Label::Gain(1))).into_iter().collect(),
                 0.9,
             )]
@@ -323,14 +668,14 @@ fn scenes_for(step: Step) -> Vec<Scene> {
             let label = (gained > 0).then_some(Label::Gain(gained));
             vec![Scene::new(
                 after,
-                event,
+                entry,
                 actor(Some(pos), label).into_iter().collect(),
                 1.4,
             )]
         }
         Event::Gained { pos, amount, .. } => {
             let marks = actor(pos, Some(Label::Gain(amount))).into_iter().collect();
-            vec![Scene::new(after, event, marks, 1.2)]
+            vec![Scene::new(after, entry, marks, 1.2)]
         }
         Event::Stole { pos, target, .. } => {
             let mut marks: Vec<Mark> = actor(pos, Some(Label::Gain(1))).into_iter().collect();
@@ -340,7 +685,7 @@ fn scenes_for(step: Step) -> Vec<Scene> {
                 Some(Label::Loss(1)),
                 Motion::Pulse,
             ));
-            vec![Scene::new(after, event, marks, 1.4)]
+            vec![Scene::new(after, entry, marks, 1.4)]
         }
         Event::Copied { pos, target, .. } => {
             let mut marks: Vec<Mark> = actor(pos, None).into_iter().collect();
@@ -350,7 +695,7 @@ fn scenes_for(step: Step) -> Vec<Scene> {
                 Some(Label::Copied),
                 Motion::Pulse,
             ));
-            vec![Scene::new(after, event, marks, 1.2)]
+            vec![Scene::new(after, entry, marks, 1.2)]
         }
         Event::Eliminated {
             by_pos, target_pos, ..
@@ -368,7 +713,7 @@ fn scenes_for(step: Step) -> Vec<Scene> {
                 Some(Label::Eliminated),
                 Motion::Vanish,
             ));
-            vec![Scene::new(before, event, marks, 1.6)]
+            vec![Scene::new(before, entry, marks, 1.6)]
         }
         Event::Ambushed {
             by_pos,
@@ -389,7 +734,7 @@ fn scenes_for(step: Step) -> Vec<Scene> {
                 Some(Label::Ambush(gained)),
                 Motion::Pulse,
             ));
-            vec![Scene::new(before, event, marks, 1.8)]
+            vec![Scene::new(before, entry, marks, 1.8)]
         }
         Event::Discarded { pos, .. } => {
             let marks = vec![Mark::new(
@@ -398,7 +743,7 @@ fn scenes_for(step: Step) -> Vec<Scene> {
                 Some(Label::Discarded),
                 Motion::Vanish,
             )];
-            vec![Scene::new(before, event, marks, 1.3)]
+            vec![Scene::new(before, entry, marks, 1.3)]
         }
         Event::Moved { from, to, .. } => {
             let leaving = vec![Mark::new(
@@ -409,87 +754,13 @@ fn scenes_for(step: Step) -> Vec<Scene> {
             )];
             let arriving = vec![Mark::new(to, Role::Actor, None, Motion::Arrive)];
             vec![
-                Scene::new(before, event, leaving, 1.2),
-                Scene::new(after, event, arriving, 0.9),
+                Scene::new(before, entry, leaving, 1.2),
+                Scene {
+                    first: false,
+                    ..Scene::new(after, entry, arriving, 0.9)
+                },
             ]
         }
-    }
-}
-
-/// One sentence for an event, in the current language.
-pub fn describe(event: Event) -> String {
-    match event {
-        Event::RoundStarted(round) => t!("log-round", round = round),
-        Event::Placed { player, slot } => {
-            let key = match slot {
-                Slot::Left => "log-placed-left",
-                Slot::Right => "log-placed-right",
-                Slot::OnStack(_) => "log-placed-stack",
-            };
-            t!(key, player = player_name(player))
-        }
-        Event::KeptHidden {
-            player, influence, ..
-        } => t!(
-            "log-kept-hidden",
-            player = player_name(player),
-            influence = influence
-        ),
-        Event::Revealed { card, gained, .. } => t!(
-            "log-revealed",
-            player = player_name(card.owner),
-            card = card_name(card.kind),
-            gained = gained
-        ),
-        Event::Gained { player, amount, .. } => {
-            t!("log-gained", player = player_name(player), amount = amount)
-        }
-        Event::Stole { thief, victim, .. } => t!(
-            "log-stole",
-            thief = player_name(thief),
-            victim = player_name(victim)
-        ),
-        Event::Copied { player, kind, .. } => t!(
-            "log-copied",
-            player = player_name(player),
-            card = card_name(kind)
-        ),
-        Event::Eliminated { by, target, .. } => t!(
-            "log-eliminated",
-            player = player_name(by.owner),
-            card = card_name(by.kind),
-            target = card_name(target.kind),
-            owner = player_name(target.owner)
-        ),
-        Event::Ambushed {
-            attacker,
-            owner,
-            gained,
-            ..
-        } => t!(
-            "log-ambushed",
-            player = player_name(attacker.owner),
-            card = card_name(attacker.kind),
-            owner = player_name(owner),
-            gained = gained
-        ),
-        Event::Discarded { card, .. } => t!(
-            "log-discarded",
-            player = player_name(card.owner),
-            card = card_name(card.kind)
-        ),
-        Event::Moved {
-            player,
-            moved_owner,
-            to,
-            ..
-        } => t!(
-            "log-moved",
-            player = player_name(player),
-            owner = player_name(moved_owner),
-            position = to.saturating_add(1)
-        ),
-        Event::GameOver => t!("game-is-over"),
     }
 }
 
@@ -526,8 +797,9 @@ pub fn bot_turns(
     mut dirty: ResMut<UiDirty>,
     mut next: ResMut<NextState<Screen>>,
 ) {
-    // Nobody moves, and the game does not end, until the last action is shown.
-    if session.playing_back() {
+    // Nobody moves, and the game does not end, until the last action is shown
+    // and the log window is closed.
+    if session.playing_back() || session.log_window.is_some() {
         return;
     }
     let Some(player) = session.state.current_player() else {
@@ -558,4 +830,119 @@ pub fn bot_turns(
         AsyncComputeTaskPool::get()
             .spawn(async move { make_strategy(difficulty).choose(&view, &legal, &mut rng) }),
     );
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Plays a whole game with random legal actions and returns its steps
+    /// and the final state.
+    fn random_game(seed: u64, players: usize) -> (GameState, Vec<Step>) {
+        let mut rng = Rng64::new(seed);
+        let mut state = GameState::new(players, &mut rng).unwrap();
+        let mut steps = Vec::new();
+        while state.current_player().is_some() {
+            let legal = state.legal_actions();
+            let action = legal[rng.below(legal.len())];
+            steps.extend(state.apply_traced(action).unwrap());
+        }
+        (state, steps)
+    }
+
+    /// The starting influence plus the changes of all entries makes the
+    /// final scores.
+    #[test]
+    fn changes_add_up_to_the_scores() {
+        for (seed, players) in (0..20).zip([3, 4, 5].into_iter().cycle()) {
+            let (state, steps) = random_game(seed, players);
+            // Every player starts with some influence.
+            let mut totals: Vec<i64> = steps[0]
+                .before
+                .influence
+                .iter()
+                .map(|&i| i64::from(i))
+                .collect();
+            for step in &steps {
+                for (player, change) in Entry::from_step(step).changes {
+                    totals[player] = totals[player].saturating_add(change);
+                }
+            }
+            let scores: Vec<i64> = state.scores().into_iter().map(i64::from).collect();
+            assert_eq!(totals, scores, "seed {seed}");
+        }
+    }
+
+    /// The log never names an opponent's face-down card, and always names
+    /// the human's own cards.
+    #[test]
+    fn hidden_cards_stay_hidden() {
+        for seed in 0..20 {
+            let (_, steps) = random_game(seed, 4);
+            for step in &steps {
+                let entry = Entry::from_step(step);
+                match step.event {
+                    Event::Placed { player, .. } | Event::KeptHidden { player, .. } => {
+                        let actor = entry.actor.unwrap();
+                        assert_eq!(actor.owner, player);
+                        assert_eq!(actor.kind.is_some(), player == HUMAN, "{:?}", step.event);
+                    }
+                    Event::Revealed { .. } | Event::Eliminated { .. } | Event::Copied { .. } => {
+                        assert!(entry.actor.unwrap().kind.is_some());
+                    }
+                    _ => {}
+                }
+            }
+        }
+    }
+
+    /// Every story names the cards its sentence mentions, and no mark is
+    /// left in the text.
+    #[test]
+    fn stories_have_their_cards() {
+        let (_, steps) = random_game(7, 5);
+        for step in &steps {
+            let entry = Entry::from_step(step);
+            for piece in entry.story() {
+                match piece {
+                    Piece::Text(text) => {
+                        assert!(!text.is_empty());
+                        assert!(!text.contains([ACTOR_MARK, TARGET_MARK]), "{text}");
+                    }
+                    Piece::Card { card, .. } => {
+                        if !matches!(step.event, Event::Gained { pos: None, .. }) {
+                            assert!(card.is_some(), "{:?}", step.event);
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn punctuation_stays_with_its_card() {
+        let lord = Some(Seen {
+            owner: 1,
+            kind: Some(CardKind::Lord),
+        });
+        let spy = Some(Seen {
+            owner: 0,
+            kind: Some(CardKind::Spy),
+        });
+        let pieces = split_story("A (\u{E001}) and \u{E000}.", spy, lord);
+        let card = |card, prefix: &str, suffix: &str| Piece::Card {
+            card,
+            prefix: prefix.to_owned(),
+            suffix: suffix.to_owned(),
+        };
+        assert_eq!(
+            pieces,
+            vec![
+                Piece::Text("A ".to_owned()),
+                card(lord, "(", ")"),
+                Piece::Text(" and ".to_owned()),
+                card(spy, "", "."),
+            ]
+        );
+    }
 }
