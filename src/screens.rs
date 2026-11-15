@@ -705,61 +705,74 @@ fn card(ui: &mut ChildSpawnerCommands, art: &CardArt, look: CardLook) {
         },
         ..ImageNode::new(art.image(look.kind))
     };
-    let border = match look.mark.map(|mark| mark.role) {
+    // The emphasis colour is an outer ring around the owner's colour frame, so
+    // the owner stays visible. The ring is transparent when there is none, so
+    // every card has the same size.
+    let ring = match look.mark.map(|mark| mark.role) {
         Some(Role::Target) => RED,
         Some(Role::Actor) => GOLD,
         None if look.highlight => GOLD,
-        None => family_color(look.owner),
+        None => Color::NONE,
     };
 
     ui.spawn(column(3.0)).with_children(|ui| {
         if let Some(pointing) = look.arrow {
             arrow_space(ui, art, pointing);
         }
-        let mut frame = ui.spawn((
+        let mut outer = ui.spawn((
             Node {
-                width: px(CARD_W),
-                height: px(CARD_H),
                 border: UiRect::all(px(5)),
-                border_radius: BorderRadius::all(px(12)),
+                border_radius: BorderRadius::all(px(17)),
                 ..default()
             },
-            BackgroundColor(family_color(look.owner)),
-            BorderColor::all(border),
+            BorderColor::all(ring),
         ));
         if let Some(click) = look.click {
-            frame.insert((Button, Hovered::default(), click, RestBorder(border)));
+            outer.insert((Button, Hovered::default(), click, RestBorder(ring)));
         }
         if let Some(mark) = look.mark {
-            frame.insert(mark.motion);
+            outer.insert(mark.motion);
             if mark.motion == Motion::Arrive {
                 // Start small, so the card is not drawn full size for one frame.
-                frame.insert(UiTransform {
+                outer.insert(UiTransform {
                     scale: Vec2::splat(0.4),
                     ..UiTransform::IDENTITY
                 });
             }
         }
-        frame.with_children(|ui| {
-            ui.spawn((
-                image,
+        outer.with_children(|ui| {
+            let mut frame = ui.spawn((
                 Node {
-                    width: px(ART_W),
-                    height: px(ART_H),
+                    width: px(CARD_W),
+                    height: px(CARD_H),
+                    border: UiRect::all(px(5)),
+                    border_radius: BorderRadius::all(px(12)),
                     ..default()
                 },
+                BackgroundColor(family_color(look.owner)),
+                BorderColor::all(family_color(look.owner)),
             ));
-            if look.influence > 0 {
-                badge(ui, look.influence.to_string(), GOLD, true);
-            }
-            if look.depth > 1 {
-                badge(ui, format!("x{}", look.depth), PAPER, false);
-            }
-            if let Some(mark) = look.mark
-                && let Some(label) = &mark.label
-            {
-                effect_label(ui, &label.text(), mark.role);
-            }
+            frame.with_children(|ui| {
+                ui.spawn((
+                    image,
+                    Node {
+                        width: px(ART_W),
+                        height: px(ART_H),
+                        ..default()
+                    },
+                ));
+                if look.influence > 0 {
+                    badge(ui, look.influence.to_string(), GOLD, true);
+                }
+                if look.depth > 1 {
+                    badge(ui, format!("x{}", look.depth), PAPER, false);
+                }
+                if let Some(mark) = look.mark
+                    && let Some(label) = &mark.label
+                {
+                    effect_label(ui, &label.text(), mark.role);
+                }
+            });
         });
         ui.spawn(text(look.caption, 14.0, PAPER));
         if let Some(note) = look.note {
