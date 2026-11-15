@@ -721,8 +721,8 @@ fn card(ui: &mut ChildSpawnerCommands, art: &CardArt, look: CardLook) {
         }
         let mut outer = ui.spawn((
             Node {
-                border: UiRect::all(px(3)),
-                border_radius: BorderRadius::all(px(15)),
+                border: UiRect::all(px(5)),
+                border_radius: BorderRadius::all(px(17)),
                 ..default()
             },
             BorderColor::all(ring),
