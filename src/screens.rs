@@ -68,26 +68,141 @@ const LOG_WINDOW_W: f32 = 860.0;
 const LOG_TEXT: f32 = 17.0;
 const LOG_WINDOW_TEXT: f32 = 20.0;
 
-/// Design size of the screens, in UI pixels, at scale 1. The board is about
-/// this tall with one row of cards; each further row of the queue adds
-/// `ROW_EXTRA_H`.
-const BOARD_H: f32 = 890.0;
-const ROW_EXTRA_H: f32 = 190.0;
-const BOARD_MIN_W: f32 = 760.0;
+/// Narrowest width, in UI pixels, at which the screens are laid out: the
+/// top bar with its buttons and drop-downs and a score box fit in it. A
+/// narrower window shrinks the interface instead.
+const BOARD_MIN_W: f32 = 560.0;
 const MENU_H: f32 = 640.0;
 const MENU_MIN_W: f32 = 560.0;
-/// Width of a queue card with its gap, and the extra width of a Royal Decree
-/// "move here" button between two cards.
-const QUEUE_SLOT_W: f32 = 112.0;
-const DECREE_GAP_W: f32 = 110.0;
+/// From this width on, the round title sits in the top bar between the
+/// buttons; on narrower screens it has a line of its own.
+const WIDE_W: f32 = 900.0;
+/// Width taken by one card in a row of cards, its gap included: the card
+/// with its emphasis ring and a little room for a long caption.
+const CARD_SLOT_W: f32 = 118.0;
+/// Extra width of a Royal Decree "move here" slot before a queue card.
+const DECREE_GAP_W: f32 = 52.0;
+const MOVE_SLOT_W: f32 = 40.0;
+/// Gap between cards in a row and between rows.
+const CARD_GAP: f32 = 8.0;
+/// Height of a queue card with the arrow space and two caption lines, and of
+/// a hand card with one caption line.
+const QUEUE_CARD_H: f32 = 201.0;
+const HAND_CARD_H: f32 = 158.0;
+/// Padding of the screen and of the queue panel.
+const PAGE_PAD: f32 = 12.0;
+const QUEUE_PAD: f32 = 10.0;
+/// Gap between the parts of a screen.
+const SECTION_GAP: f32 = 10.0;
+/// Estimated width of one score box and height of a line of them.
+const SCORE_W: f32 = 420.0;
+const SCORE_H: f32 = 44.0;
 /// Smallest scale; below it the text is too small to read.
 const MIN_SCALE: f32 = 0.5;
 
+/// Width of the window in UI pixels at the current scale. The board splits
+/// rows of cards by it.
+#[derive(Resource, Default)]
+pub struct ViewWidth(pub f32);
+
+/// How many of `count` items of width `item_w` (gap included) go in a row
+/// `width` wide. When they do not fit in one row they are spread evenly over
+/// as few rows as possible: 7 cards that need two rows are 4 and 3, not 6
+/// and 1.
+fn per_row(count: usize, item_w: f32, width: f32) -> usize {
+    // The last item needs no gap after it.
+    let fit = (((width + CARD_GAP) / item_w).floor() as usize).max(1);
+    let rows = count.div_ceil(fit).max(1);
+    count.div_ceil(rows).max(1)
+}
+
+/// Number of rows `count` items take; see [`per_row`].
+fn rows_of(count: usize, item_w: f32, width: f32) -> usize {
+    count.div_ceil(per_row(count, item_w, width)).max(1)
+}
+
+/// Height of `rows` rows of cards `card_h` tall.
+fn rows_height(rows: usize, card_h: f32) -> f32 {
+    let rows = rows.max(1) as f32;
+    rows * card_h + (rows - 1.0) * CARD_GAP
+}
+
+/// What the queue row shows: how many card places (cards and "place here"
+/// slots) and the width of each.
+fn queue_items(session: &Session) -> (usize, f32) {
+    let queue = session
+        .scene
+        .as_ref()
+        .map_or(session.state.queue.len(), |s| s.queue.len());
+    if session.move_from.is_some() {
+        return (queue, CARD_SLOT_W + DECREE_GAP_W);
+    }
+    let slots = if session.scene.is_none()
+        && session.selected.is_some()
+        && matches!(session.state.phase, Phase::Placement { .. })
+    {
+        2
+    } else {
+        0
+    };
+    (queue.saturating_add(slots), CARD_SLOT_W)
+}
+
+/// Width available to the queue's cards on a screen `width` wide.
+fn queue_width(width: f32) -> f32 {
+    width - 2.0 * (PAGE_PAD + QUEUE_PAD)
+}
+
+/// Width available to the hand's cards on a screen `width` wide.
+fn hand_width(width: f32) -> f32 {
+    width - 2.0 * PAGE_PAD
+}
+
+/// Height the board needs on a screen `width` wide, estimated from its
+/// parts. Parts that come and go during a turn (the Reveal buttons, a second
+/// line of the headline) always count, so the scale does not jump.
+fn board_height(session: &Session, width: f32) -> f32 {
+    let narrow = width < WIDE_W;
+    let players = session.state.players.len();
+    let score_rows = rows_of(players, SCORE_W + SECTION_GAP, width - 2.0 * PAGE_PAD);
+    let (items, item_w) = queue_items(session);
+    let queue_rows = rows_of(items, item_w, queue_width(width));
+    let hand = session
+        .state
+        .players
+        .get(HUMAN)
+        .map_or(0, |player| player.hand.len());
+    let hand_rows = rows_of(hand, CARD_SLOT_W, hand_width(width));
+    let parts = [
+        // Top bar, and the round title under it on a narrow screen.
+        48.0,
+        if narrow { 34.0 } else { 0.0 },
+        rows_height(score_rows, SCORE_H),
+        // Headline.
+        if narrow { 60.0 } else { 34.0 },
+        // Queue panel: the spear and the rows of cards.
+        2.0 * QUEUE_PAD + 44.0 + rows_height(queue_rows, QUEUE_CARD_H),
+        // Reveal buttons.
+        50.0,
+        // "Your hand" and the hand.
+        22.0,
+        rows_height(hand_rows, HAND_CARD_H),
+        // Card explanation, taller when its text wraps.
+        if narrow { 112.0 } else { 96.0 },
+        LOG_PANEL_H,
+    ];
+    let gaps = parts.iter().filter(|h| **h > 0.0).count().saturating_sub(1) as f32;
+    parts.iter().sum::<f32>() + gaps * SECTION_GAP + 2.0 * PAGE_PAD
+}
+
 /// Shrinks the whole interface so that it fits the window: the largest scale
-/// up to 1 at which the board, with its queue wrapped into as many rows as
-/// the width forces, is not taller than the window.
+/// up to 1 at which the screen, with its rows of cards split as the width
+/// forces, is as wide as its narrowest layout and not taller than the window.
+/// Records the resulting width in [`ViewWidth`] and redraws when it changes.
 pub fn fit_ui_scale(
     mut scale: ResMut<UiScale>,
+    mut view: ResMut<ViewWidth>,
+    mut dirty: ResMut<UiDirty>,
     windows: Query<&Window, With<PrimaryWindow>>,
     screen: Res<State<Screen>>,
     session: Option<Res<Session>>,
@@ -99,32 +214,20 @@ pub fn fit_ui_scale(
     if width <= 0.0 || height <= 0.0 {
         return;
     }
-    let (min_w, base_h, stacks, slot_w) = match (screen.get(), session.as_deref()) {
-        (Screen::Playing, Some(session)) => {
-            let queue = session
-                .scene
-                .as_ref()
-                .map_or(session.state.queue.len(), |s| s.queue.len());
-            let slot = if session.move_from.is_some() {
-                QUEUE_SLOT_W + DECREE_GAP_W
-            } else {
-                QUEUE_SLOT_W
-            };
-            (BOARD_MIN_W, BOARD_H, queue, slot)
+    let session = session.as_deref();
+    let needs = |avail_w: f32| -> (f32, f32) {
+        match (screen.get(), session) {
+            (Screen::Playing, Some(session)) => (BOARD_MIN_W, board_height(session, avail_w)),
+            (Screen::GameOver, _) => (MENU_MIN_W, MENU_H * 0.7),
+            _ => (MENU_MIN_W, MENU_H),
         }
-        (Screen::GameOver, _) => (MENU_MIN_W, MENU_H * 0.7, 0, QUEUE_SLOT_W),
-        _ => (MENU_MIN_W, MENU_H, 0, QUEUE_SLOT_W),
     };
     let mut best = MIN_SCALE;
     let mut candidate = 1.0_f32;
     while candidate >= MIN_SCALE {
         let avail_w = width / candidate;
-        let avail_h = height / candidate;
-        // Panel padding and the page margin.
-        let per_row = ((avail_w - 60.0) / slot_w).floor().max(1.0);
-        let rows = (stacks as f32 / per_row).ceil().max(1.0);
-        let needed_h = base_h + (rows - 1.0) * ROW_EXTRA_H;
-        if avail_w >= min_w && needed_h <= avail_h {
+        let (min_w, needed_h) = needs(avail_w);
+        if avail_w >= min_w && needed_h <= height / candidate {
             best = candidate;
             break;
         }
@@ -132,6 +235,11 @@ pub fn fit_ui_scale(
     }
     if (scale.0 - best).abs() > 0.001 {
         scale.0 = best;
+    }
+    let view_w = width / scale.0;
+    if (view.0 - view_w).abs() > 0.5 {
+        view.0 = view_w;
+        dirty.0 = true;
     }
 }
 
@@ -439,6 +547,7 @@ pub fn rebuild_ui(
     art: Res<CardArt>,
     language_menu: Res<LanguageMenu>,
     speed_menu: Res<SpeedMenu>,
+    view: Res<ViewWidth>,
 ) {
     if !dirty.0 && !screen.is_changed() {
         return;
@@ -452,40 +561,90 @@ pub fn rebuild_ui(
         Node {
             width: percent(100),
             height: percent(100),
+            // The root is a grid item of Bevy's viewport node, whose least
+            // width is otherwise its content's: the screen would grow wider
+            // than the window instead of wrapping.
+            min_width: px(0),
+            min_height: px(0),
             flex_direction: FlexDirection::Column,
             align_items: AlignItems::Center,
-            padding: UiRect::all(px(12)),
-            row_gap: px(10),
+            padding: UiRect::all(px(PAGE_PAD)),
+            row_gap: px(SECTION_GAP),
             ..default()
         },
         BackgroundColor(FELT),
     ));
+    let pickers = Pickers {
+        language_open: language_menu.0,
+        speed_open: speed_menu.0,
+    };
     root.with_children(|ui| match (screen.get(), session.as_deref()) {
-        (Screen::Playing, Some(session)) => board(ui, session, &art),
-        (Screen::GameOver, Some(session)) => game_over(ui, session, &art),
-        _ => menu(ui, &settings, &art),
+        (Screen::Playing, Some(session)) => board(ui, session, &art, pickers, view.0),
+        (Screen::GameOver, Some(session)) => {
+            top_bar(ui, pickers, |_| {}, None);
+            game_over(ui, session, &art);
+        }
+        _ => {
+            top_bar(ui, pickers, |_| {}, None);
+            menu(ui, &settings, &art);
+        }
     });
-    root.with_children(|ui| top_right_pickers(ui, language_menu.0, speed_menu.0));
 }
 
-/// The drop-downs in the top right corner: playback speed, then language.
-fn top_right_pickers(ui: &mut ChildSpawnerCommands, language_open: bool, speed_open: bool) {
+/// Which drop-downs of the top bar are open.
+#[derive(Clone, Copy)]
+struct Pickers {
+    language_open: bool,
+    speed_open: bool,
+}
+
+/// The bar at the top of every screen: the screen's own buttons on the left,
+/// the playback speed and language drop-downs on the right, and `title`
+/// between them.
+fn top_bar(
+    ui: &mut ChildSpawnerCommands,
+    pickers: Pickers,
+    left: impl FnOnce(&mut ChildSpawnerCommands),
+    title: Option<String>,
+) {
     ui.spawn((
         Node {
-            position_type: PositionType::Absolute,
-            top: px(12),
-            right: px(12),
+            width: percent(100),
             flex_direction: FlexDirection::Row,
-            align_items: AlignItems::FlexStart,
+            flex_wrap: FlexWrap::Wrap,
+            align_items: AlignItems::Center,
+            justify_content: JustifyContent::SpaceBetween,
             column_gap: px(8),
+            row_gap: px(8),
+            flex_shrink: 0.0,
             ..default()
         },
         // Drawn over the screen, so an open list covers what is under it.
         GlobalZIndex(10),
     ))
     .with_children(|ui| {
-        speed_picker(ui, speed_open);
-        language_picker(ui, language_open);
+        // Each group of buttons stays on one line.
+        let group = Node {
+            flex_wrap: FlexWrap::NoWrap,
+            flex_shrink: 0.0,
+            align_items: AlignItems::FlexStart,
+            ..row(8.0)
+        };
+        ui.spawn(group.clone()).with_children(left);
+        if let Some(title) = title {
+            ui.spawn(Node {
+                flex_grow: 1.0,
+                justify_content: JustifyContent::Center,
+                ..default()
+            })
+            .with_children(|ui| {
+                ui.spawn(text(title, 26.0, GOLD));
+            });
+        }
+        ui.spawn(group).with_children(|ui| {
+            speed_picker(ui, pickers.speed_open);
+            language_picker(ui, pickers.language_open);
+        });
     });
 }
 
@@ -532,7 +691,6 @@ fn dropdown(
     ui.spawn(Node {
         flex_direction: FlexDirection::Column,
         align_items: AlignItems::Stretch,
-        row_gap: px(4),
         ..default()
     })
     .with_children(|ui| {
@@ -558,7 +716,19 @@ fn dropdown(
             caret(ui, open);
         });
         if open {
-            options(ui);
+            // Under the button, over whatever is below it.
+            ui.spawn(Node {
+                position_type: PositionType::Absolute,
+                top: percent(100),
+                right: px(0),
+                min_width: percent(100),
+                margin: UiRect::top(px(4)),
+                flex_direction: FlexDirection::Column,
+                align_items: AlignItems::Stretch,
+                row_gap: px(4),
+                ..default()
+            })
+            .with_children(options);
         }
     });
 }
@@ -597,6 +767,14 @@ fn text(content: impl Into<String>, size: f32, color: Color) -> impl Bundle {
     )
 }
 
+/// Text whose lines are centred when it wraps.
+fn centered(content: impl Into<String>, size: f32, color: Color) -> impl Bundle {
+    (
+        text(content, size, color),
+        TextLayout::justify(Justify::Center),
+    )
+}
+
 fn row(gap: f32) -> Node {
     Node {
         flex_direction: FlexDirection::Row,
@@ -606,6 +784,16 @@ fn row(gap: f32) -> Node {
         column_gap: px(gap),
         row_gap: px(gap),
         ..default()
+    }
+}
+
+/// A wrapping row as wide as its parent. A wrapping row that only takes the
+/// width of its content can be measured on one line and then laid out on
+/// two, and its second line covers what comes after it.
+fn wide_row(gap: f32) -> Node {
+    Node {
+        width: percent(100),
+        ..row(gap)
     }
 }
 
@@ -875,13 +1063,9 @@ fn badge(ui: &mut ChildSpawnerCommands, label: String, fill: Color, top: bool) {
 }
 
 fn menu(ui: &mut ChildSpawnerCommands, settings: &Settings, art: &CardArt) {
-    ui.spawn(Node {
-        height: px(30),
-        ..default()
-    });
     // The game's name is not translated.
     ui.spawn(text("Oriflamme", 72.0, GOLD));
-    ui.spawn(text(t!("app-tagline"), 22.0, DIM));
+    ui.spawn(centered(t!("app-tagline"), 22.0, DIM));
 
     // A hand of cards in one line. When the screen is too narrow the slots
     // shrink and the cards overlap, like cards held in a hand; the last card
@@ -939,7 +1123,7 @@ fn menu(ui: &mut ChildSpawnerCommands, settings: &Settings, art: &CardArt) {
     });
 
     ui.spawn(text(t!("players"), 24.0, PAPER));
-    ui.spawn(row(10.0)).with_children(|ui| {
+    ui.spawn(wide_row(10.0)).with_children(|ui| {
         for count in MIN_PLAYERS..=MAX_PLAYERS {
             let label = t!("player-count", count = count, pcs = count.saturating_sub(1));
             button(ui, &label, Click::Players(count), settings.players == count);
@@ -947,7 +1131,7 @@ fn menu(ui: &mut ChildSpawnerCommands, settings: &Settings, art: &CardArt) {
     });
 
     ui.spawn(text(t!("strength"), 24.0, PAPER));
-    ui.spawn(row(10.0)).with_children(|ui| {
+    ui.spawn(wide_row(10.0)).with_children(|ui| {
         for level in Difficulty::ALL {
             let name = match level {
                 Difficulty::Easy => t!("level-easy"),
@@ -998,7 +1182,15 @@ fn prompt(session: &Session) -> String {
     }
 }
 
-fn board(ui: &mut ChildSpawnerCommands, session: &Session, art: &CardArt) {
+/// The game table. `width` is the screen width in UI pixels; rows of cards
+/// that do not fit in it are split evenly.
+fn board(
+    ui: &mut ChildSpawnerCommands,
+    session: &Session,
+    art: &CardArt,
+    pickers: Pickers,
+    width: f32,
+) {
     let state = &session.state;
     let legal = if session.human_turn() {
         state.legal_actions()
@@ -1014,26 +1206,13 @@ fn board(ui: &mut ChildSpawnerCommands, session: &Session, art: &CardArt) {
         state.current_player()
     };
 
-    ui.spawn(row(24.0)).with_children(|ui| {
-        ui.spawn(text(
-            t!("round-of", round = state.round, rounds = ROUNDS),
-            26.0,
-            GOLD,
-        ));
-    });
-
-    // The menu button sits in the top left corner.
-    ui.spawn((
-        Node {
-            position_type: PositionType::Absolute,
-            top: px(12),
-            left: px(12),
-            ..default()
-        },
-        GlobalZIndex(10),
-    ))
-    .with_children(|ui| {
-        ui.spawn(row(8.0)).with_children(|ui| {
+    // The round title sits in the top bar when there is room, else under it.
+    let title = t!("round-of", round = state.round, rounds = ROUNDS);
+    let wide = width >= WIDE_W;
+    top_bar(
+        ui,
+        pickers,
+        |ui| {
             button(ui, &t!("menu"), Click::Menu, false);
             button(
                 ui,
@@ -1041,11 +1220,15 @@ fn board(ui: &mut ChildSpawnerCommands, session: &Session, art: &CardArt) {
                 Click::Log,
                 session.log_window.is_some(),
             );
-        });
-    });
+        },
+        wide.then(|| title.clone()),
+    );
+    if !wide {
+        ui.spawn(centered(title, 26.0, GOLD));
+    }
 
     // Scores.
-    ui.spawn(row(10.0)).with_children(|ui| {
+    ui.spawn(wide_row(10.0)).with_children(|ui| {
         for (player, info) in state.players.iter().enumerate() {
             let active = current == Some(player);
             let influence = scene
@@ -1084,7 +1267,7 @@ fn board(ui: &mut ChildSpawnerCommands, session: &Session, art: &CardArt) {
     match scene {
         Some(scene) => story_line(ui, art, &scene.entry),
         None => {
-            ui.spawn(text(prompt(session), 22.0, PAPER));
+            ui.spawn(centered(prompt(session), 22.0, PAPER));
         }
     }
 
@@ -1125,74 +1308,53 @@ fn board(ui: &mut ChildSpawnerCommands, session: &Session, art: &CardArt) {
                 ..default()
             },
         ));
+        // Cards and "place here" slots, in queue order, split into rows.
+        let mut items = Vec::with_capacity(queue.len().saturating_add(2));
+        if can_place(Slot::Left) {
+            items.push(QueueItem::Place(Slot::Left));
+        }
+        items.extend((0..queue.len()).map(QueueItem::Card));
+        if can_place(Slot::Right) {
+            items.push(QueueItem::Place(Slot::Right));
+        }
+        let (_, item_w) = queue_items(session);
+        let row_len = per_row(items.len(), item_w, queue_width(width));
         ui.spawn(Node {
             width: percent(100),
-            min_height: px(200),
-            ..row(8.0)
+            min_height: px(QUEUE_CARD_H),
+            justify_content: JustifyContent::Center,
+            ..column(CARD_GAP)
         })
         .with_children(|ui| {
-            if queue.is_empty() && !can_place(Slot::Left) {
+            if items.is_empty() {
                 ui.spawn(text(t!("queue-empty"), 20.0, DIM));
             }
-            if can_place(Slot::Left) {
-                place_slot(ui, Slot::Left);
-            }
-            for (pos, stack) in queue.iter().enumerate() {
-                move_gap(ui, session, &legal, pos);
-                let Some(top) = stack.last() else {
-                    continue;
-                };
-                let click = if can_place(Slot::OnStack(pos)) {
-                    Some(Click::Slot(Slot::OnStack(pos)))
-                } else if legal.contains(&Action::Target(pos)) {
-                    Some(Click::Do(Action::Target(pos)))
-                } else if session.move_from.is_none()
-                    && legal
-                        .iter()
-                        .any(|a| matches!(a, Action::Move { from, .. } if *from == pos))
-                {
-                    Some(Click::MoveFrom(pos))
-                } else {
-                    None
-                };
-                let mine = top.card.owner == HUMAN;
-                let (caption, note) = if top.face_up {
-                    (card_name(top.card.kind), String::new())
-                } else if mine {
-                    (card_name(top.card.kind), t!("hidden"))
-                } else {
-                    (t!("face-down"), String::new())
-                };
-                card(
-                    ui,
-                    art,
-                    CardLook {
-                        owner: top.card.owner,
-                        kind: (top.face_up || mine).then_some(top.card.kind),
-                        secret: mine && !top.face_up,
-                        influence: top.influence,
-                        depth: stack.len(),
-                        highlight: click.is_some()
-                            || pointed == Some(pos)
-                            || session.move_from == Some(pos),
-                        click,
-                        caption,
-                        note: Some(note),
-                        arrow: Some(pointed == Some(pos)),
-                        mark: scene
-                            .and_then(|scene| scene.marks.iter().find(|mark| mark.pos == pos)),
-                    },
-                );
-            }
-            move_gap(ui, session, &legal, queue.len());
-            if can_place(Slot::Right) {
-                place_slot(ui, Slot::Right);
+            let rows = items.chunks(row_len).count();
+            for (row_index, chunk) in items.chunks(row_len).enumerate() {
+                ui.spawn(Node {
+                    width: percent(100),
+                    ..row(CARD_GAP)
+                })
+                .with_children(|ui| {
+                    for &item in chunk {
+                        match item {
+                            QueueItem::Place(slot) => place_slot(ui, slot),
+                            QueueItem::Card(pos) => {
+                                move_gap(ui, session, &legal, pos);
+                                queue_card(ui, session, art, &legal, pos, pointed, &can_place);
+                            }
+                        }
+                    }
+                    if row_index.saturating_add(1) == rows {
+                        move_gap(ui, session, &legal, queue.len());
+                    }
+                });
             }
         });
     });
 
     // Choices that are not a card on the table.
-    ui.spawn(row(10.0)).with_children(|ui| {
+    ui.spawn(wide_row(10.0)).with_children(|ui| {
         if legal.contains(&Action::Reveal) {
             button(ui, &t!("reveal"), Click::Do(Action::Reveal), true);
             button(ui, &t!("keep-hidden"), Click::Do(Action::KeepHidden), false);
@@ -1204,33 +1366,24 @@ fn board(ui: &mut ChildSpawnerCommands, session: &Session, art: &CardArt) {
 
     // The human's hand.
     ui.spawn(text(t!("your-hand"), 18.0, DIM));
-    // Full width, so the row wraps only when the cards really do not fit;
-    // a shrink-to-fit wrapping row can wrap early and overlap what is below.
+    let hand = state.players.get(HUMAN).map_or(&[][..], |p| &p.hand);
+    let my_turn_to_place = session.human_turn() && matches!(state.phase, Phase::Placement { .. });
+    let row_len = per_row(hand.len(), CARD_SLOT_W, hand_width(width));
     ui.spawn(Node {
         width: percent(100),
-        ..row(8.0)
+        ..column(CARD_GAP)
     })
     .with_children(|ui| {
-        let my_turn_to_place =
-            session.human_turn() && matches!(state.phase, Phase::Placement { .. });
-        for &kind in state.players.get(HUMAN).map_or(&[][..], |p| &p.hand) {
-            card(
-                ui,
-                art,
-                CardLook {
-                    owner: HUMAN,
-                    kind: Some(kind),
-                    secret: false,
-                    influence: 0,
-                    depth: 1,
-                    click: my_turn_to_place.then_some(Click::Hand(kind)),
-                    highlight: session.selected == Some(kind),
-                    caption: card_name(kind),
-                    note: None,
-                    arrow: None,
-                    mark: None,
-                },
-            );
+        for chunk in hand.chunks(row_len) {
+            ui.spawn(Node {
+                width: percent(100),
+                ..row(CARD_GAP)
+            })
+            .with_children(|ui| {
+                for &kind in chunk {
+                    hand_card(ui, art, session, kind, my_turn_to_place);
+                }
+            });
         }
     });
     card_info(ui, session);
@@ -1239,6 +1392,101 @@ fn board(ui: &mut ChildSpawnerCommands, session: &Session, art: &CardArt) {
     if let Some(round) = session.log_window {
         log_window(ui, session, art, round);
     }
+}
+
+/// A place in the drawn queue.
+#[derive(Clone, Copy)]
+enum QueueItem {
+    /// A "place here" slot for the picked hand card.
+    Place(Slot),
+    /// The stack at this queue position.
+    Card(usize),
+}
+
+/// The top card of the stack at queue position `pos`, clickable when it is a
+/// legal choice.
+fn queue_card(
+    ui: &mut ChildSpawnerCommands,
+    session: &Session,
+    art: &CardArt,
+    legal: &[Action],
+    pos: usize,
+    pointed: Option<usize>,
+    can_place: &dyn Fn(Slot) -> bool,
+) {
+    let scene = session.scene.as_ref();
+    let queue = scene.map_or(&session.state.queue, |scene| &scene.queue);
+    let Some(stack) = queue.get(pos) else {
+        return;
+    };
+    let Some(top) = stack.last() else {
+        return;
+    };
+    let click = if can_place(Slot::OnStack(pos)) {
+        Some(Click::Slot(Slot::OnStack(pos)))
+    } else if legal.contains(&Action::Target(pos)) {
+        Some(Click::Do(Action::Target(pos)))
+    } else if session.move_from.is_none()
+        && legal
+            .iter()
+            .any(|a| matches!(a, Action::Move { from, .. } if *from == pos))
+    {
+        Some(Click::MoveFrom(pos))
+    } else {
+        None
+    };
+    let mine = top.card.owner == HUMAN;
+    let (caption, note) = if top.face_up {
+        (card_name(top.card.kind), String::new())
+    } else if mine {
+        (card_name(top.card.kind), t!("hidden"))
+    } else {
+        (t!("face-down"), String::new())
+    };
+    card(
+        ui,
+        art,
+        CardLook {
+            owner: top.card.owner,
+            kind: (top.face_up || mine).then_some(top.card.kind),
+            secret: mine && !top.face_up,
+            influence: top.influence,
+            depth: stack.len(),
+            highlight: click.is_some() || pointed == Some(pos) || session.move_from == Some(pos),
+            click,
+            caption,
+            note: Some(note),
+            arrow: Some(pointed == Some(pos)),
+            mark: scene.and_then(|scene| scene.marks.iter().find(|mark| mark.pos == pos)),
+        },
+    );
+}
+
+/// A card in the human's hand, clickable while they place a card.
+fn hand_card(
+    ui: &mut ChildSpawnerCommands,
+    art: &CardArt,
+    session: &Session,
+    kind: CardKind,
+    clickable: bool,
+) {
+    card(
+        ui,
+        art,
+        CardLook {
+            owner: HUMAN,
+            kind: Some(kind),
+            secret: false,
+            influence: 0,
+            depth: 1,
+            click: clickable.then_some(Click::Hand(kind)),
+            highlight: session.selected == Some(kind),
+            caption: card_name(kind),
+            note: None,
+            arrow: None,
+            mark: None,
+        },
+    );
 }
 
 /// The latest part of the story, on a strip of parchment: the last
@@ -1322,7 +1570,8 @@ fn log_window(ui: &mut ChildSpawnerCommands, session: &Session, art: &CardArt, r
             bottom: px(0),
             flex_direction: FlexDirection::Column,
             align_items: AlignItems::Center,
-            padding: UiRect::axes(px(16), px(16)),
+            // The top bar stays over the window; start below it.
+            padding: UiRect::new(px(16), px(16), px(72), px(16)),
             row_gap: px(10),
             ..default()
         },
@@ -1335,7 +1584,7 @@ fn log_window(ui: &mut ChildSpawnerCommands, session: &Session, art: &CardArt, r
         if running {
             ui.spawn(text(t!("log-paused"), 16.0, DIM));
         }
-        ui.spawn(row(8.0)).with_children(|ui| {
+        ui.spawn(wide_row(8.0)).with_children(|ui| {
             for tab in &session.log {
                 small_button(
                     ui,
@@ -1820,8 +2069,53 @@ fn move_gap(ui: &mut ChildSpawnerCommands, session: &Session, legal: &[Action], 
     // A lone card has the same destination on both of its sides; offer it once.
     let duplicate = lone && gap == from.saturating_add(1);
     if legal.contains(&action) && !duplicate {
-        button(ui, &t!("move-here"), Click::Do(action), true);
+        move_slot(ui, Click::Do(action));
     }
+}
+
+/// A narrow gold slot between two queue cards where the Royal Decree puts
+/// the picked card. Its label is written upwards, so a row of cards with
+/// these slots between them stays narrow.
+fn move_slot(ui: &mut ChildSpawnerCommands, click: Click) {
+    ui.spawn(column(3.0)).with_children(|ui| {
+        // Same space as the arrow above a card, to stay level with the cards.
+        ui.spawn(Node {
+            width: px(ARROW_W),
+            height: px(ARROW_H),
+            ..default()
+        });
+        ui.spawn((
+            Button,
+            Hovered::default(),
+            click,
+            RestBorder(INK),
+            Node {
+                width: px(MOVE_SLOT_W),
+                height: px(CARD_H + 10.0),
+                border: UiRect::all(px(3)),
+                border_radius: BorderRadius::all(px(10)),
+                align_items: AlignItems::Center,
+                justify_content: JustifyContent::Center,
+                overflow: Overflow::visible(),
+                ..default()
+            },
+            BackgroundColor(GOLD),
+            BorderColor::all(INK),
+        ))
+        .with_children(|ui| {
+            ui.spawn((
+                text(t!("move-here"), 20.0, INK),
+                Node {
+                    flex_shrink: 0.0,
+                    ..default()
+                },
+                UiTransform {
+                    rotation: Rot2::degrees(-90.0),
+                    ..UiTransform::IDENTITY
+                },
+            ));
+        });
+    });
 }
 
 fn game_over(ui: &mut ChildSpawnerCommands, session: &Session, art: &CardArt) {
@@ -1838,10 +2132,10 @@ fn game_over(ui: &mut ChildSpawnerCommands, session: &Session, art: &CardArt) {
         t!("winners", names = names.join(&t!("and")))
     };
     ui.spawn(Node {
-        height: px(60),
+        height: px(20),
         ..default()
     });
-    ui.spawn(text(headline, 64.0, GOLD));
+    ui.spawn(centered(headline, 64.0, GOLD));
 
     let mut ranking: Vec<(PlayerId, u32)> = state.scores().into_iter().enumerate().collect();
     ranking.sort_by_key(|&(_, score)| std::cmp::Reverse(score));
@@ -1865,8 +2159,8 @@ fn game_over(ui: &mut ChildSpawnerCommands, session: &Session, art: &CardArt) {
             ));
         }
     });
-    ui.spawn(text(t!("tie-break"), 16.0, DIM));
-    ui.spawn(row(10.0)).with_children(|ui| {
+    ui.spawn(centered(t!("tie-break"), 16.0, DIM));
+    ui.spawn(wide_row(10.0)).with_children(|ui| {
         button(ui, &t!("log-open"), Click::Log, false);
         button(ui, &t!("back-to-menu"), Click::Menu, true);
     });

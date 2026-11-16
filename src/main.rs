@@ -47,6 +47,7 @@ fn main() -> AppExit {
     .init_resource::<screens::CardArt>()
     .init_resource::<screens::LanguageMenu>()
     .init_resource::<screens::SpeedMenu>()
+    .init_resource::<screens::ViewWidth>()
     .insert_resource(screens::UiDirty(true))
     .add_systems(Startup, setup)
     .add_systems(
@@ -58,8 +59,8 @@ fn main() -> AppExit {
     .add_systems(
         Update,
         (
-            screens::fit_ui_scale,
-            screens::rebuild_ui,
+            // The scale and the width decide how rows of cards are split.
+            (screens::fit_ui_scale, screens::rebuild_ui).chain(),
             screens::hover_style,
             screens::animate,
             screens::scroll_log,
