@@ -787,6 +787,16 @@ fn row(gap: f32) -> Node {
     }
 }
 
+/// A wrapping row as wide as its parent. A wrapping row that only takes the
+/// width of its content can be measured on one line and then laid out on
+/// two, and its second line covers what comes after it.
+fn wide_row(gap: f32) -> Node {
+    Node {
+        width: percent(100),
+        ..row(gap)
+    }
+}
+
 fn column(gap: f32) -> Node {
     Node {
         flex_direction: FlexDirection::Column,
@@ -1113,7 +1123,7 @@ fn menu(ui: &mut ChildSpawnerCommands, settings: &Settings, art: &CardArt) {
     });
 
     ui.spawn(text(t!("players"), 24.0, PAPER));
-    ui.spawn(row(10.0)).with_children(|ui| {
+    ui.spawn(wide_row(10.0)).with_children(|ui| {
         for count in MIN_PLAYERS..=MAX_PLAYERS {
             let label = t!("player-count", count = count, pcs = count.saturating_sub(1));
             button(ui, &label, Click::Players(count), settings.players == count);
@@ -1121,7 +1131,7 @@ fn menu(ui: &mut ChildSpawnerCommands, settings: &Settings, art: &CardArt) {
     });
 
     ui.spawn(text(t!("strength"), 24.0, PAPER));
-    ui.spawn(row(10.0)).with_children(|ui| {
+    ui.spawn(wide_row(10.0)).with_children(|ui| {
         for level in Difficulty::ALL {
             let name = match level {
                 Difficulty::Easy => t!("level-easy"),
@@ -1218,7 +1228,7 @@ fn board(
     }
 
     // Scores.
-    ui.spawn(row(10.0)).with_children(|ui| {
+    ui.spawn(wide_row(10.0)).with_children(|ui| {
         for (player, info) in state.players.iter().enumerate() {
             let active = current == Some(player);
             let influence = scene
@@ -1344,7 +1354,7 @@ fn board(
     });
 
     // Choices that are not a card on the table.
-    ui.spawn(row(10.0)).with_children(|ui| {
+    ui.spawn(wide_row(10.0)).with_children(|ui| {
         if legal.contains(&Action::Reveal) {
             button(ui, &t!("reveal"), Click::Do(Action::Reveal), true);
             button(ui, &t!("keep-hidden"), Click::Do(Action::KeepHidden), false);
@@ -1574,7 +1584,7 @@ fn log_window(ui: &mut ChildSpawnerCommands, session: &Session, art: &CardArt, r
         if running {
             ui.spawn(text(t!("log-paused"), 16.0, DIM));
         }
-        ui.spawn(row(8.0)).with_children(|ui| {
+        ui.spawn(wide_row(8.0)).with_children(|ui| {
             for tab in &session.log {
                 small_button(
                     ui,
@@ -2150,7 +2160,7 @@ fn game_over(ui: &mut ChildSpawnerCommands, session: &Session, art: &CardArt) {
         }
     });
     ui.spawn(centered(t!("tie-break"), 16.0, DIM));
-    ui.spawn(row(10.0)).with_children(|ui| {
+    ui.spawn(wide_row(10.0)).with_children(|ui| {
         button(ui, &t!("log-open"), Click::Log, false);
         button(ui, &t!("back-to-menu"), Click::Menu, true);
     });
