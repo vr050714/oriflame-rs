@@ -9,8 +9,8 @@ strength = Сила компьютера
 level-easy = Лёгкий
 level-medium = Средний
 level-hard = Сложный
-speed-normal = Быстро
-speed-slow = Медленно
+stepping-auto = Авто
+stepping-manual = Вручную
 start-game = Начать игру
 
 ## Players

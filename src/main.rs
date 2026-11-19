@@ -46,7 +46,7 @@ fn main() -> AppExit {
     .init_resource::<game::BotTurn>()
     .init_resource::<screens::CardArt>()
     .init_resource::<screens::LanguageMenu>()
-    .init_resource::<screens::SpeedMenu>()
+    .init_resource::<screens::SteppingMenu>()
     .init_resource::<screens::ViewWidth>()
     .insert_resource(screens::UiDirty(true))
     .add_systems(Startup, setup)
