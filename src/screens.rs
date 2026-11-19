@@ -7,7 +7,7 @@ use crate::{
     Screen,
     game::{
         BotTurn, Entry, HUMAN, LogLine, Mark, Piece, Role, RoundLog, Seen, Sentence, Session,
-        Settings, Speed, player_name, set_speed, speed,
+        Settings, Stepping, player_name, set_stepping, stepping,
     },
     i18n::{self, Language, card_description, card_name},
     t,
@@ -34,6 +34,8 @@ const PAPER: Color = Color::srgb(0.96, 0.91, 0.76);
 const GOLD: Color = Color::srgb(0.95, 0.76, 0.19);
 const DIM: Color = Color::srgb(0.72, 0.78, 0.74);
 const HIDDEN_TINT: Color = Color::srgb(0.62, 0.62, 0.70);
+/// Colour of the continue button's triangle while there is nothing to play.
+const DISABLED_TINT: Color = Color::srgba(0.96, 0.91, 0.76, 0.3);
 const RED: Color = Color::srgb(0.88, 0.22, 0.18);
 /// Text colour of an influence loss; `RED` is too dark to read on the panels.
 const LOSS: Color = Color::srgb(1.0, 0.52, 0.46);
@@ -45,6 +47,10 @@ const CRIMSON: Color = Color::srgb(0.50, 0.08, 0.05);
 const PAGE_DIM: Color = Color::srgb(0.34, 0.26, 0.20);
 
 /// Size of the arrow that points at the card being resolved.
+/// Diameter of the round continue button: as tall as the drop-down buttons.
+const PLAY_D: f32 = 40.0;
+/// How much faster than their nominal times the animations run.
+const ANIMATION_RATE: f32 = 1.2;
 const ARROW_W: f32 = 26.0;
 const ARROW_H: f32 = 22.0;
 /// Size of the spear that shows the resolution direction.
@@ -266,6 +272,8 @@ pub struct CardArt {
     spear: Handle<Image>,
     /// Arrow pointing down at a card.
     arrow: Handle<Image>,
+    /// Triangle of the continue button, white so it can be tinted.
+    play: Handle<Image>,
     /// Card miniatures for the game log.
     minis: Vec<(CardKind, Handle<Image>)>,
     /// Miniature of a face-down card.
@@ -338,6 +346,7 @@ impl FromWorld for CardArt {
             back: decode("back", include_bytes!("../assets/cards/back.png")),
             spear: decode("spear", include_bytes!("../assets/ui/spear.png")),
             arrow: decode("arrow", include_bytes!("../assets/ui/arrow.png")),
+            play: decode("play", include_bytes!("../assets/ui/play.png")),
             minis: CardKind::ALL
                 .into_iter()
                 .map(|kind| (kind, decode(kind.slug(), mini_png(kind))))
@@ -382,8 +391,8 @@ pub struct MotionClock(f32);
 
 /// Moves every node that has a [`Motion`].
 pub fn animate(time: Res<Time>, mut nodes: Query<(&Motion, &mut MotionClock, &mut UiTransform)>) {
-    // A slower speed stretches every animation; scene lengths stay the same.
-    let step = time.delta_secs() / speed().factor();
+    // Animations run a little faster than their nominal times.
+    let step = time.delta_secs() * ANIMATION_RATE;
     for (motion, mut clock, mut transform) in &mut nodes {
         clock.0 += step;
         let t = clock.0;
@@ -411,9 +420,9 @@ pub struct UiDirty(pub bool);
 #[derive(Resource, Default)]
 pub struct LanguageMenu(pub bool);
 
-/// True while the speed list under the speed button is open.
+/// True while the stepping list under the stepping button is open.
 #[derive(Resource, Default)]
-pub struct SpeedMenu(pub bool);
+pub struct SteppingMenu(pub bool);
 
 /// Root node of the current screen.
 #[derive(Component)]
@@ -442,9 +451,11 @@ pub enum Click {
     /// Open or close the language list.
     LanguageMenu,
     Language(Language),
-    /// Open or close the playback speed list.
-    SpeedMenu,
-    Speed(Speed),
+    /// Open or close the playback stepping list.
+    SteppingMenu,
+    Stepping(Stepping),
+    /// Manual stepping: play the scene that waits on screen.
+    Continue,
     /// Open or close the log window.
     Log,
     /// Show the story of this round in the log window.
@@ -466,7 +477,7 @@ pub fn on_click(
     mut dirty: ResMut<UiDirty>,
     mut next: ResMut<NextState<Screen>>,
     mut language_menu: ResMut<LanguageMenu>,
-    mut speed_menu: ResMut<SpeedMenu>,
+    mut stepping_menu: ResMut<SteppingMenu>,
 ) {
     let Ok(&click) = clicks.get(event.entity) else {
         return;
@@ -474,12 +485,17 @@ pub fn on_click(
     dirty.0 = true;
     // Any click closes both lists; a list's own button toggles it.
     let language_was_open = std::mem::take(&mut language_menu.0);
-    let speed_was_open = std::mem::take(&mut speed_menu.0);
+    let stepping_was_open = std::mem::take(&mut stepping_menu.0);
     match click {
         Click::LanguageMenu => language_menu.0 = !language_was_open,
         Click::Language(language) => i18n::set_language(language),
-        Click::SpeedMenu => speed_menu.0 = !speed_was_open,
-        Click::Speed(new_speed) => set_speed(new_speed),
+        Click::SteppingMenu => stepping_menu.0 = !stepping_was_open,
+        Click::Stepping(mode) => set_stepping(mode),
+        Click::Continue => {
+            if let Some(session) = session.as_mut() {
+                session.go_on();
+            }
+        }
         Click::Players(count) => settings.players = count,
         Click::Level(difficulty) => settings.difficulty = difficulty,
         Click::Start => match Session::new(*settings) {
@@ -546,7 +562,7 @@ pub fn rebuild_ui(
     session: Option<Res<Session>>,
     art: Res<CardArt>,
     language_menu: Res<LanguageMenu>,
-    speed_menu: Res<SpeedMenu>,
+    stepping_menu: Res<SteppingMenu>,
     view: Res<ViewWidth>,
 ) {
     if !dirty.0 && !screen.is_changed() {
@@ -576,16 +592,17 @@ pub fn rebuild_ui(
     ));
     let pickers = Pickers {
         language_open: language_menu.0,
-        speed_open: speed_menu.0,
+        stepping_open: stepping_menu.0,
+        waiting: session.as_deref().is_some_and(|s| s.waiting),
     };
     root.with_children(|ui| match (screen.get(), session.as_deref()) {
         (Screen::Playing, Some(session)) => board(ui, session, &art, pickers, view.0),
         (Screen::GameOver, Some(session)) => {
-            top_bar(ui, pickers, |_| {}, None);
+            top_bar(ui, art.as_ref(), pickers, |_| {}, None);
             game_over(ui, session, &art);
         }
         _ => {
-            top_bar(ui, pickers, |_| {}, None);
+            top_bar(ui, art.as_ref(), pickers, |_| {}, None);
             menu(ui, &settings, &art);
         }
     });
@@ -595,14 +612,17 @@ pub fn rebuild_ui(
 #[derive(Clone, Copy)]
 struct Pickers {
     language_open: bool,
-    speed_open: bool,
+    stepping_open: bool,
+    /// Manual stepping: a scene waits for the continue button.
+    waiting: bool,
 }
 
 /// The bar at the top of every screen: the screen's own buttons on the left,
-/// the playback speed and language drop-downs on the right, and `title`
+/// the playback stepping and language drop-downs on the right, and `title`
 /// between them.
 fn top_bar(
     ui: &mut ChildSpawnerCommands,
+    art: &CardArt,
     pickers: Pickers,
     left: impl FnOnce(&mut ChildSpawnerCommands),
     title: Option<String>,
@@ -641,27 +661,79 @@ fn top_bar(
                 ui.spawn(text(title, 26.0, GOLD));
             });
         }
-        ui.spawn(group).with_children(|ui| {
-            speed_picker(ui, pickers.speed_open);
+        ui.spawn(Node {
+            align_items: AlignItems::Center,
+            ..group
+        })
+        .with_children(|ui| {
+            if stepping() == Stepping::Manual {
+                continue_button(ui, art, pickers.waiting);
+            }
+            stepping_picker(ui, pickers.stepping_open);
             language_picker(ui, pickers.language_open);
         });
     });
 }
 
-/// The speed drop-down: a button with the current speed and, when open, the
-/// list of speeds under it.
-fn speed_picker(ui: &mut ChildSpawnerCommands, open: bool) {
-    let current = speed();
-    dropdown(ui, &t!(current.key()), Click::SpeedMenu, open, |ui| {
-        for option in Speed::ALL {
+/// The stepping drop-down: a button with the current mode and, when open,
+/// the list of modes under it.
+fn stepping_picker(ui: &mut ChildSpawnerCommands, open: bool) {
+    let current = stepping();
+    dropdown(ui, &t!(current.key()), Click::SteppingMenu, open, |ui| {
+        for option in Stepping::ALL {
             button(
                 ui,
                 &t!(option.key()),
-                Click::Speed(option),
+                Click::Stepping(option),
                 option == current,
             );
         }
     });
+}
+
+/// Manual stepping: the round play button that lets the waiting scene play.
+/// It is dimmed and does nothing unless a scene waits.
+fn continue_button(ui: &mut ChildSpawnerCommands, art: &CardArt, active: bool) {
+    let (fill, tint) = if active {
+        (GOLD, INK)
+    } else {
+        (PANEL, DISABLED_TINT)
+    };
+    let rest = INK;
+    let mut node = ui.spawn((
+        Node {
+            width: px(PLAY_D),
+            height: px(PLAY_D),
+            border: UiRect::all(px(3)),
+            border_radius: BorderRadius::MAX,
+            align_items: AlignItems::Center,
+            justify_content: JustifyContent::Center,
+            ..default()
+        },
+        BackgroundColor(fill),
+        BorderColor::all(rest),
+        children![(
+            ImageNode {
+                color: tint,
+                ..ImageNode::new(art.play.clone())
+            },
+            Node {
+                width: px(PLAY_D * 0.5),
+                height: px(PLAY_D * 0.5),
+                // The triangle's weight is left of its box centre.
+                margin: UiRect::left(px(PLAY_D * 0.06)),
+                ..default()
+            },
+        )],
+    ));
+    if active {
+        node.insert((
+            Button,
+            Hovered::default(),
+            Click::Continue,
+            RestBorder(rest),
+        ));
+    }
 }
 
 /// The language drop-down: a button with the current language and, when open,
@@ -868,6 +940,8 @@ struct CardLook<'a> {
     arrow: Option<bool>,
     /// The card's part in the scene being shown.
     mark: Option<&'a Mark>,
+    /// Manual stepping: the scene waits to play, so the mark does not move yet.
+    still: bool,
 }
 
 /// The space above a queue card, with the arrow in it when `pointing`.
@@ -918,7 +992,7 @@ fn card(ui: &mut ChildSpawnerCommands, art: &CardArt, look: CardLook) {
         if let Some(click) = look.click {
             outer.insert((Button, Hovered::default(), click, RestBorder(ring)));
         }
-        if let Some(mark) = look.mark {
+        if let Some(mark) = look.mark.filter(|_| !look.still) {
             outer.insert(mark.motion);
             if mark.motion == Motion::Arrive {
                 // Start small, so the card is not drawn full size for one frame.
@@ -1211,6 +1285,7 @@ fn board(
     let wide = width >= WIDE_W;
     top_bar(
         ui,
+        art,
         pickers,
         |ui| {
             button(ui, &t!("menu"), Click::Menu, false);
@@ -1458,6 +1533,7 @@ fn queue_card(
             note: Some(note),
             arrow: Some(pointed == Some(pos)),
             mark: scene.and_then(|scene| scene.marks.iter().find(|mark| mark.pos == pos)),
+            still: session.waiting,
         },
     );
 }
@@ -1485,6 +1561,7 @@ fn hand_card(
             note: None,
             arrow: None,
             mark: None,
+            still: false,
         },
     );
 }

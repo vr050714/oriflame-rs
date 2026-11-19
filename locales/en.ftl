@@ -11,8 +11,8 @@ level-easy = Easy
 level-medium = Medium
 level-hard = Hard
 start-game = Start game
-speed-normal = Fast
-speed-slow = Slow
+stepping-auto = Auto
+stepping-manual = Manual
 
 ## Players
 

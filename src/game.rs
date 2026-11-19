@@ -27,51 +27,44 @@ pub const HUMAN: PlayerId = 0;
 /// Seconds a computer player waits before it starts to think.
 const BOT_DELAY: f32 = 0.5;
 
-/// How fast the animations of the playback run. Scene lengths and the wait
-/// before a computer player moves do not depend on it.
+/// How the playback of the resolution goes on from one card to the next.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub enum Speed {
-    /// Animations run 20 percent faster than on the main branch.
+pub enum Stepping {
+    /// Every scene plays one after another.
     #[default]
-    Normal,
-    /// Animations take 30 percent longer than on the main branch, for new players.
-    Slow,
+    Auto,
+    /// The playback stops before each card acts in the resolution, showing what it is about to
+    /// do, until the human presses the continue button.
+    Manual,
 }
 
-impl Speed {
-    /// Every speed, in the order of the speed menu.
-    pub const ALL: [Speed; 2] = [Speed::Normal, Speed::Slow];
+impl Stepping {
+    /// Every mode, in the order of the stepping menu.
+    pub const ALL: [Stepping; 2] = [Stepping::Auto, Stepping::Manual];
 
-    /// Multiplier for the duration of every animation.
-    pub fn factor(self) -> f32 {
-        match self {
-            Speed::Normal => 1.0 / 1.2,
-            Speed::Slow => 1.3,
-        }
-    }
-
-    /// Key of the speed's name in the locale files.
+    /// Key of the mode's name in the locale files.
     pub fn key(self) -> &'static str {
         match self {
-            Speed::Normal => "speed-normal",
-            Speed::Slow => "speed-slow",
+            Stepping::Auto => "stepping-auto",
+            Stepping::Manual => "stepping-manual",
         }
     }
 }
 
-/// The speed in use, as an index into [`Speed::ALL`].
-static SPEED: AtomicU8 = AtomicU8::new(0);
+/// The stepping mode in use, as an index into [`Stepping::ALL`].
+static STEPPING: AtomicU8 = AtomicU8::new(0);
 
-/// Switches the animation speed. Takes effect at once.
-pub fn set_speed(speed: Speed) {
-    let index = Speed::ALL.iter().position(|&s| s == speed).unwrap_or(0);
-    SPEED.store(u8::try_from(index).unwrap_or(0), Ordering::Relaxed);
+/// Switches the stepping mode. Takes effect at once: switching to
+/// [`Stepping::Auto`] lets a paused playback go on.
+pub fn set_stepping(mode: Stepping) {
+    let index = Stepping::ALL.iter().position(|&s| s == mode).unwrap_or(0);
+    STEPPING.store(u8::try_from(index).unwrap_or(0), Ordering::Relaxed);
 }
 
-/// The playback speed in use.
-pub fn speed() -> Speed {
-    let index = usize::from(SPEED.load(Ordering::Relaxed));
-    Speed::ALL.get(index).copied().unwrap_or_default()
+/// The stepping mode in use.
+pub fn stepping() -> Stepping {
+    let index = usize::from(STEPPING.load(Ordering::Relaxed));
+    Stepping::ALL.get(index).copied().unwrap_or_default()
 }
 
 /// Choices made on the menu screen.
@@ -156,6 +149,9 @@ pub struct Scene {
     /// False for the second scene of an event shown in two, so that the
     /// event is logged once.
     first: bool,
+    /// True for the first scene of an action the human chose: the human has
+    /// just decided it, so manual stepping does not stop before it.
+    chosen: bool,
     seconds: f32,
 }
 
@@ -167,6 +163,7 @@ impl Scene {
             entry: entry.clone(),
             marks,
             first: true,
+            chosen: false,
             seconds,
         }
     }
@@ -536,6 +533,26 @@ enum Topic {
     Turn(Option<Seen>),
 }
 
+impl Topic {
+    /// What `entry` is about, and whether it starts a new card action of the
+    /// resolution after one about `last`: a card revealed or kept hidden, or
+    /// another card than before acting. The start of a round and the cards
+    /// put down before the resolution are no card actions.
+    fn card_action(entry: &Entry, last: Option<Topic>) -> (Option<Topic>, bool) {
+        match entry.event {
+            Event::RoundStarted(_) | Event::GameOver => (None, false),
+            Event::Placed { .. } => (Some(Topic::Placement), false),
+            Event::KeptHidden { .. } | Event::Revealed { .. } => {
+                (Some(Topic::Turn(entry.actor)), true)
+            }
+            _ => {
+                let this = Some(Topic::Turn(entry.actor));
+                (this, last != this)
+            }
+        }
+    }
+}
+
 /// A sentence of the story: a log line, and whether it opens its paragraph.
 pub struct Sentence<'a> {
     pub line: &'a LogLine,
@@ -628,6 +645,11 @@ pub struct Session {
     /// Scenes still to be shown.
     scenes: VecDeque<Scene>,
     scene_timer: Timer,
+    /// Manual stepping: the scene on screen waits for the continue button
+    /// before it plays.
+    pub waiting: bool,
+    /// What the last scene shown was about, to tell when a new card acts.
+    last_topic: Option<Topic>,
 }
 
 impl Session {
@@ -649,6 +671,8 @@ impl Session {
             scene: None,
             scenes: VecDeque::new(),
             scene_timer: Timer::from_seconds(0.0, TimerMode::Once),
+            waiting: false,
+            last_topic: None,
         })
     }
 
@@ -684,9 +708,16 @@ impl Session {
 
     /// Applies an action for the current player and queues its scenes.
     pub fn apply(&mut self, action: Action) {
+        let mover = self.state.current_player();
         match self.state.apply_traced(action) {
             Ok(steps) => {
+                let first = self.scenes.len();
                 self.scenes.extend(steps.into_iter().flat_map(scenes_for));
+                if mover == Some(HUMAN)
+                    && let Some(scene) = self.scenes.get_mut(first)
+                {
+                    scene.chosen = true;
+                }
                 if self.scene.is_none() {
                     self.next_scene();
                 }
@@ -699,6 +730,7 @@ impl Session {
 
     /// Shows the next queued scene, or returns to the live table.
     fn next_scene(&mut self) {
+        self.waiting = false;
         self.scene = self.scenes.pop_front();
         let Some(scene) = &self.scene else {
             return;
@@ -706,9 +738,17 @@ impl Session {
         self.scene_timer = Timer::from_seconds(scene.seconds, TimerMode::Once);
         // An event shown in two scenes is logged once.
         if scene.first {
+            let (topic, starts) = Topic::card_action(&scene.entry, self.last_topic);
+            self.last_topic = topic;
+            self.waiting = starts && !scene.chosen && stepping() == Stepping::Manual;
             let line = LogLine::Entry(scene.entry.clone());
             self.record(line);
         }
+    }
+
+    /// Manual stepping: plays the scene that waits on screen.
+    pub fn go_on(&mut self) {
+        self.waiting = false;
     }
 }
 
@@ -716,6 +756,15 @@ impl Session {
 pub fn play_scenes(time: Res<Time>, mut session: ResMut<Session>, mut dirty: ResMut<UiDirty>) {
     // The playback waits while the log window is open.
     if session.log_window.is_some() {
+        return;
+    }
+    // A scene waiting for the continue button plays at once when the mode is
+    // switched to automatic.
+    if session.waiting {
+        if stepping() == Stepping::Auto {
+            session.go_on();
+            dirty.0 = true;
+        }
         return;
     }
     if session.playing_back() && session.scene_timer.tick(time.delta()).is_finished() {
@@ -1087,5 +1136,48 @@ mod tests {
                 card(spy, "", "."),
             ]
         );
+    }
+
+    /// Manual stepping stops before every computer card that is revealed or
+    /// kept hidden, and never while cards are put down or before the human's
+    /// own choice.
+    #[test]
+    fn manual_stepping_stops_before_card_actions() {
+        set_stepping(Stepping::Manual);
+        for seed in 0..10 {
+            let mut session = Session::new(Settings::default()).unwrap();
+            session.rng = Rng64::new(seed);
+            let mut rng = Rng64::new(seed);
+            let mut stops = 0;
+            while session.state.current_player().is_some() || session.playing_back() {
+                if let Some(scene) = &session.scene {
+                    let card_turn = matches!(
+                        scene.entry.event,
+                        Event::KeptHidden { .. } | Event::Revealed { .. }
+                    );
+                    if scene.first && card_turn && !scene.chosen {
+                        assert!(session.waiting, "{:?}", scene.entry.event);
+                    }
+                    if scene.chosen
+                        || matches!(
+                            scene.entry.event,
+                            Event::RoundStarted(_) | Event::Placed { .. }
+                        )
+                    {
+                        assert!(!session.waiting, "{:?}", scene.entry.event);
+                    }
+                    if session.waiting {
+                        stops += 1;
+                        session.go_on();
+                    }
+                    session.next_scene();
+                    continue;
+                }
+                let legal = session.state.legal_actions();
+                session.apply(legal[rng.below(legal.len())]);
+            }
+            assert!(stops > 0);
+        }
+        set_stepping(Stepping::Auto);
     }
 }
