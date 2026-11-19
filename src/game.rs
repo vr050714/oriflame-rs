@@ -33,7 +33,7 @@ pub enum Stepping {
     /// Every scene plays one after another.
     #[default]
     Auto,
-    /// The playback stops before each card acts, showing what it is about to
+    /// The playback stops before each card acts in the resolution, showing what it is about to
     /// do, until the human presses the continue button.
     Manual,
 }
@@ -534,13 +534,14 @@ enum Topic {
 }
 
 impl Topic {
-    /// What `entry` is about, and whether it starts a new card action after
-    /// one about `last`: a card put down, revealed or kept hidden, or another
-    /// card than before acting. The start of a round is no card action.
+    /// What `entry` is about, and whether it starts a new card action of the
+    /// resolution after one about `last`: a card revealed or kept hidden, or
+    /// another card than before acting. The start of a round and the cards
+    /// put down before the resolution are no card actions.
     fn card_action(entry: &Entry, last: Option<Topic>) -> (Option<Topic>, bool) {
         match entry.event {
             Event::RoundStarted(_) | Event::GameOver => (None, false),
-            Event::Placed { .. } => (Some(Topic::Placement), true),
+            Event::Placed { .. } => (Some(Topic::Placement), false),
             Event::KeptHidden { .. } | Event::Revealed { .. } => {
                 (Some(Topic::Turn(entry.actor)), true)
             }
@@ -1137,8 +1138,9 @@ mod tests {
         );
     }
 
-    /// Manual stepping stops before every computer card that is put down,
-    /// revealed or kept hidden, and never before the human's own choice.
+    /// Manual stepping stops before every computer card that is revealed or
+    /// kept hidden, and never while cards are put down or before the human's
+    /// own choice.
     #[test]
     fn manual_stepping_stops_before_card_actions() {
         set_stepping(Stepping::Manual);
@@ -1151,12 +1153,17 @@ mod tests {
                 if let Some(scene) = &session.scene {
                     let card_turn = matches!(
                         scene.entry.event,
-                        Event::Placed { .. } | Event::KeptHidden { .. } | Event::Revealed { .. }
+                        Event::KeptHidden { .. } | Event::Revealed { .. }
                     );
                     if scene.first && card_turn && !scene.chosen {
                         assert!(session.waiting, "{:?}", scene.entry.event);
                     }
-                    if scene.chosen || matches!(scene.entry.event, Event::RoundStarted(_)) {
+                    if scene.chosen
+                        || matches!(
+                            scene.entry.event,
+                            Event::RoundStarted(_) | Event::Placed { .. }
+                        )
+                    {
                         assert!(!session.waiting, "{:?}", scene.entry.event);
                     }
                     if session.waiting {
