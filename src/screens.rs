@@ -184,10 +184,10 @@ fn board_height(session: &Session, width: f32) -> f32 {
         48.0,
         if narrow { 34.0 } else { 0.0 },
         rows_height(score_rows, SCORE_H),
-        // Headline.
-        if narrow { 60.0 } else { 34.0 },
         // Queue panel: the spear and the rows of cards.
         2.0 * QUEUE_PAD + 44.0 + rows_height(queue_rows, QUEUE_CARD_H),
+        // Headline.
+        if narrow { 60.0 } else { 34.0 },
         // Reveal buttons.
         50.0,
         // "Your hand" and the hand.
@@ -1338,14 +1338,6 @@ fn board(
         }
     });
 
-    // The headline: the event being shown, or what to do now.
-    match scene {
-        Some(scene) => story_line(ui, art, &scene.entry),
-        None => {
-            ui.spawn(centered(prompt(session), 22.0, PAPER));
-        }
-    }
-
     // The card the arrow points at: the one acting in the scene, or the one
     // waiting for its owner's decision.
     let pointed = match scene {
@@ -1427,6 +1419,15 @@ fn board(
             }
         });
     });
+
+    // The headline: the event being shown, or what to do now. Placed below the
+    // board so wrapping between one and two lines does not shift the table.
+    match scene {
+        Some(scene) => story_line(ui, art, &scene.entry),
+        None => {
+            ui.spawn(centered(prompt(session), 22.0, PAPER));
+        }
+    }
 
     // Choices that are not a card on the table.
     ui.spawn(wide_row(10.0)).with_children(|ui| {
