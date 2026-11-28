@@ -6,7 +6,7 @@
 
 The Oriflamme card game (3–5 players) for one human against computer opponents, built with Rust and Bevy.
 
-**[Play in the browser](https://vr050714.github.io/oriflame-rs/)**
+**[Play in the browser](https://vr050714.github.io/oriflamme-rs/)**
 
 ![Oriflamme screenshot](docs/screenshot.png)
 
